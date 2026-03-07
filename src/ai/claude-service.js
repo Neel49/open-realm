@@ -28,33 +28,46 @@ async function post(endpoint, body) {
     }
 }
 
-// ---- NPC Profile Generation ----
-
-const OCCUPATIONS = [
-    'baker','mechanic','artist','musician','librarian','detective','chef',
-    'botanist','inventor','fisherman','blacksmith','alchemist','tailor',
-    'merchant','scholar','guard','healer','bard','explorer','astronomer',
-];
+// ---- NPC Profile Generation (fully generative) ----
 
 export async function generateNPCProfile(seed) {
     const key = `npc_${seed}`;
     if (cache.has(key)) return cache.get(key);
 
-    const occupation = OCCUPATIONS[Math.abs(seed) % OCCUPATIONS.length];
+    // Use seed to derive a unique occupation hint so Gemini doesn't repeat
+    const occupationPool = [
+        'hot dog vendor','quantum physicist','retired pirate','tattoo artist','DJ',
+        'firefighter','librarian','astronaut','sushi chef','detective','yoga instructor',
+        'blacksmith','TikTok influencer','bus driver','marine biologist','graffiti artist',
+        'fortune teller','barista','boxing coach','florist','hacker','jazz musician',
+        'pilot','pizza delivery','park ranger','mad scientist','street magician',
+        'kindergarten teacher','bounty hunter','food critic','stunt double','beekeeper',
+        'archaeologist','roller derby queen','stock broker','ice cream man','taxidermist',
+        'submarine captain','rodeo clown','perfumer','spelunker','dog whisperer',
+        'voice actor','glassblower','storm chaser','train conductor','cake decorator',
+    ];
+    const occ = occupationPool[Math.abs(seed) % occupationPool.length];
+
     const result = await post('chat', {
-        system: 'You generate game NPC data. Respond ONLY with valid JSON, no markdown, no backticks.',
-        prompt: `Create a unique NPC who is a ${occupation} in a fantasy open world city.
-Respond ONLY in JSON: {"name":"...","occupation":"...","personality":"one sentence","greeting":"short greeting under 15 words","hair_color":[r,g,b],"shirt_color":[r,g,b],"pants_color":[r,g,b]}
-Use color values 0.0-1.0. Be creative.`,
+        system: `You generate game NPC data. This NPC MUST be a ${occ}. Do NOT change the occupation. Make them unique and memorable. Respond ONLY with valid JSON, no markdown, no backticks.`,
+        prompt: `Create an NPC who is a ${occ}. Seed ${seed} for uniqueness.
+JSON: {"name":"...","occupation":"${occ}","personality":"one vivid sentence","greeting":"short greeting under 15 words that fits their character","hair_color":[r,g,b],"shirt_color":[r,g,b],"pants_color":[r,g,b]}
+Use color values 0.0-1.0. Give them a fitting name and distinct look. Be creative with clothing colors.`,
     });
 
+    // Normalize colors — Gemini sometimes returns 0-255 instead of 0-1
+    const normColor = c => Array.isArray(c) ? c.map(v => v > 1 ? v / 255 : v) : c;
+    if (result.hair_color) result.hair_color = normColor(result.hair_color);
+    if (result.shirt_color) result.shirt_color = normColor(result.shirt_color);
+    if (result.pants_color) result.pants_color = normColor(result.pants_color);
+
     const profile = result.name ? result : {
-        name: `Citizen #${Math.abs(seed) % 1000}`,
-        occupation,
-        personality: 'A quiet local.',
-        greeting: 'Hello there.',
+        name: `Stranger #${Math.abs(seed) % 1000}`,
+        occupation: 'mysterious drifter',
+        personality: 'Nobody knows where they came from.',
+        greeting: 'Hey... you look lost.',
         hair_color: [0.1, 0.08, 0.05],
-        shirt_color: [0.3, 0.3, 0.6],
+        shirt_color: [0.3 + Math.random() * 0.5, 0.2 + Math.random() * 0.5, 0.2 + Math.random() * 0.5],
         pants_color: [0.2, 0.2, 0.25],
     };
 

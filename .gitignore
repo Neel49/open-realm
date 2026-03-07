@@ -3,6 +3,10 @@
 
 # Generated assets
 assets/generated/
+*.glb
+
+# Logs
+server.log
 
 # Python
 __pycache__/

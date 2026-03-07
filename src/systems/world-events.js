@@ -20,7 +20,7 @@ export async function processWorldEvent(npc, activity, playerMessage, scene) {
     const context = `Player at (${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)}) talking to ${npc.profile.name} (${npc.profile.occupation}). Nearby: ${getNearbyContext(playerPos, scene)}.`;
     const action = `Player said: "${playerMessage}". NPC (${npc.profile.name}) agreed to: ${activity || playerMessage}`;
 
-    showGenerating('Claude is deciding what happens...');
+    showGenerating('AI is deciding what happens...');
     const result = await triggerWorldEvent(context, action);
     hideGenerating();
 
