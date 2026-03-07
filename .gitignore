@@ -2,8 +2,9 @@
 .env
 
 # Generated assets
-assets/generated/
-*.glb
+assets/generated/gen_*.glb
+assets/generated/test_*.glb
+assets/generated/*.blend
 
 # Logs
 server.log

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Flower Shop Viewer</title>
+<style>
+body { margin: 0; background: #1a1a2e; overflow: hidden; }
+model-viewer { width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<model-viewer
+  src="flower_shop.glb"
+  alt="Bloom and Petal Flower Shop"
+  camera-controls
+  auto-rotate
+  shadow-intensity="1"
+  environment-image="neutral"
+  exposure="1.2"
+  tone-mapping="aces"
+  style="width:100vw;height:100vh"
+></model-viewer>
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+</body>
+</html>
