@@ -21,8 +21,12 @@ export class MusicManager {
         this.timeSinceCheck = 0;
     }
 
-    init() {
+    init(playerPos) {
         this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const env = this.getEnvironment(playerPos);
+        this.currentEnvironment = env;
+        this.lastEventCount = this.scribe.events.length;
+        this._requestNewTrack(env);
     }
 
     getEnvironment(playerPos) {
@@ -60,25 +64,33 @@ export class MusicManager {
         this.generating = true;
         try {
             const eventLog = this.scribe.getSummary();
+            console.log(`[Music] Requesting prompt for env=${environment}`);
             const prompt = await generateMusicPrompt(environment, eventLog);
+            console.log(`[Music] Prompt: ${prompt}`);
             const result = await requestMusic(environment, prompt);
-            if (!result.job_id) return;
+            if (!result.job_id) { console.warn('[Music] No job_id returned'); return; }
 
+            console.log(`[Music] Polling job ${result.job_id}...`);
             const audioPath = await pollMusicStatus(result.job_id);
-            if (!audioPath) return;
+            if (!audioPath) { console.warn('[Music] Generation failed or timed out'); return; }
 
+            console.log(`[Music] Fetching audio: ${audioPath}`);
             const response = await fetch(audioPath);
+            if (!response.ok) { console.error(`[Music] Fetch failed: ${response.status}`); return; }
             const arrayBuffer = await response.arrayBuffer();
+            console.log(`[Music] Decoding ${arrayBuffer.byteLength} bytes...`);
             const audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
+            console.log(`[Music] Playing! duration=${audioBuffer.duration.toFixed(1)}s, ctxState=${this.audioCtx.state}`);
             this._crossfadeTo(audioBuffer);
         } catch (e) {
-            console.error('Music generation failed:', e);
+            console.error('[Music] Failed:', e);
         } finally {
             this.generating = false;
         }
     }
 
     _crossfadeTo(newBuffer) {
+        if (this.audioCtx.state === 'suspended') this.audioCtx.resume();
         const now = this.audioCtx.currentTime;
 
         // Fade out current track

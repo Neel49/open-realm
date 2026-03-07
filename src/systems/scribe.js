@@ -7,6 +7,7 @@ const MAX_EVENTS = 30;
 export class Scribe {
     constructor() {
         this.events = [];
+        this.log('atmosphere', 'Mysterious night-time city — neon-lit streets, shadows between skyscrapers, distant sirens, an eerie calm in the air');
     }
 
     log(type, detail) {

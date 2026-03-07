@@ -8,10 +8,12 @@ import os
 import re
 import uuid
 import threading
-import base64
+import asyncio
+import wave
 import urllib.request
 import urllib.error
 from pathlib import Path
+from google import genai
 
 GAME_DIR = Path(__file__).parent
 
@@ -32,8 +34,9 @@ MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # Google AI config — uses GEMINI_API_KEY for both Gemini and Lyria
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-LYRIA_URL = "https://generativelanguage.googleapis.com/v1beta/models/lyria-002:predict"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+LYRIA_MODEL = "models/lyria-realtime-exp"
+LYRIA_DURATION = 10  # seconds of audio to capture
 
 # Load CLAUDE_CONTEXT.md for injection into all prompts
 CONTEXT_FILE = GAME_DIR / "CLAUDE_CONTEXT.md"
@@ -100,28 +103,42 @@ Actually create and export the geometry. Do NOT just describe what to do."""
     print(f"  Asset job {job_id}: {'SUCCESS' if success else 'FAILED'} ({abs_output})")
 
 
+async def _stream_lyria(prompt, output_path):
+    """Connect to Lyria realtime, stream audio for LYRIA_DURATION seconds, save as WAV."""
+    client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
+    pcm_chunks = []
+    sample_rate = 48000
+    channels = 2
+    bytes_needed = sample_rate * channels * 2 * LYRIA_DURATION  # 16-bit PCM
+
+    async with client.aio.live.music.connect(model=LYRIA_MODEL) as session:
+        await session.set_weighted_prompts([
+            {"text": prompt, "weight": 1.0}
+        ])
+        await session.play()
+        collected = 0
+        async for msg in session.receive():
+            if msg.server_content and msg.server_content.audio_chunks:
+                for chunk in msg.server_content.audio_chunks:
+                    if chunk.data:
+                        pcm_chunks.append(chunk.data)
+                        collected += len(chunk.data)
+            if collected >= bytes_needed:
+                break
+
+    pcm_data = b"".join(pcm_chunks)[:bytes_needed]
+    with wave.open(output_path, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_data)
+
+
 def generate_music_bg(job_id, prompt, output_path):
-    """Background thread: call Lyria via Google AI API to generate music."""
+    """Background thread: stream from Lyria realtime and save as WAV."""
     jobs[job_id]["status"] = "generating"
     try:
-        payload = json.dumps({
-            "instances": [{"prompt": prompt}],
-            "parameters": {"sample_count": 1}
-        }).encode()
-
-        req = urllib.request.Request(
-            f"{LYRIA_URL}?key={GEMINI_API_KEY}",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read())
-
-        audio_b64 = data["predictions"][0]["audioContent"]
-        with open(output_path, "wb") as f:
-            f.write(base64.b64decode(audio_b64))
-
+        asyncio.run(_stream_lyria(prompt, output_path))
     except Exception as e:
         print(f"  Music job {job_id}: FAILED — {e}")
         jobs[job_id]["status"] = "failed"

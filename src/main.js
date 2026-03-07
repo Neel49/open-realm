@@ -125,7 +125,7 @@ function animate() {
 document.getElementById('start-btn').addEventListener('click', () => {
     document.getElementById('start-screen').style.display = 'none';
     renderer.domElement.requestPointerLock();
-    music.init();
+    music.init(player.pos);
     music.resume();
     gameStarted = true;
     clock.start();
