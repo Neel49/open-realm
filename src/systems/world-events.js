@@ -9,34 +9,38 @@ import { notify, showGenerating, updateGenerating, hideGenerating } from '../ui/
 import { interactables, dynamicAssets } from '../world/chunk-manager.js';
 import { createBuilding } from '../world/building.js';
 import { spawnNPC } from '../entities/npc.js';
-import { playerPos, yaw } from '../entities/player.js';
 import { getNearbyContext } from '../utils.js';
 import { COLORS } from '../config.js';
 import { seeded } from '../utils.js';
 
 const gltfLoader = new GLTFLoader();
 
-export async function processWorldEvent(npc, activity, playerMessage, scene) {
-    const context = `Player at (${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)}) talking to ${npc.profile.name} (${npc.profile.occupation}). Nearby: ${getNearbyContext(playerPos, scene)}.`;
+export async function processWorldEvent(npc, activity, playerMessage, scene, player, scribe) {
+    const context = `Player at (${player.pos.x.toFixed(0)}, ${player.pos.z.toFixed(0)}) talking to ${npc.profile.name} (${npc.profile.occupation}). Nearby: ${getNearbyContext(player.pos, scene)}.`;
     const action = `Player said: "${playerMessage}". NPC (${npc.profile.name}) agreed to: ${activity || playerMessage}`;
 
     showGenerating('Claude is deciding what happens...');
     const result = await triggerWorldEvent(context, action);
     hideGenerating();
 
-    if (result.narrative) notify(result.narrative);
+    if (result.narrative) {
+        notify(result.narrative);
+        scribe.log('narrative', result.narrative);
+    }
     if (result.npc_dialogue) npc.chatHistory.push({ role: 'NPC', text: result.npc_dialogue });
+
+    scribe.log('npc_chat', `Player talked to ${npc.profile.name} (${npc.profile.occupation}): "${playerMessage}"`);
 
     if (result.world_changes) {
         for (const change of result.world_changes) {
-            await processChange(change, npc, scene);
+            await processChange(change, npc, scene, player, scribe);
         }
     }
 }
 
-async function processChange(change, npc, scene) {
-    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const spawnPos = playerPos.clone().add(forward.multiplyScalar(15));
+async function processChange(change, npc, scene, player, scribe) {
+    const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+    const spawnPos = player.pos.clone().add(forward.multiplyScalar(15));
     spawnPos.y = 0;
 
     if (change.type === 'spawn_building' || change.type === 'spawn_object') {
@@ -79,6 +83,7 @@ async function processChange(change, npc, scene) {
                 dynamicAssets.push(model);
                 interactables.push(model);
                 notify(`${change.label} has appeared!`);
+                scribe.log('spawn', `${change.label} appeared nearby`);
                 return;
             } catch (e) {
                 console.error('Failed to load generated asset:', e);
@@ -94,13 +99,16 @@ async function processChange(change, npc, scene) {
         scene.add(fakeChunk);
         spawnNPC(spawnPos.x, spawnPos.z, Date.now(), fakeChunk, scene);
         notify(`A new person appears: ${change.label || 'someone'}`);
+        scribe.log('spawn_npc', `New NPC appeared: ${change.label || 'someone'}`);
 
     } else if (change.type === 'teleport_player') {
-        playerPos.add(forward.multiplyScalar(10));
+        player.pos.add(forward.multiplyScalar(10));
         notify(`You travel to ${change.label || 'a new area'}`);
+        scribe.log('teleport', `Player traveled to ${change.label || 'a new area'}`);
 
     } else if (change.type === 'weather_change' || change.type === 'modify_area') {
         notify(change.description || change.label);
+        scribe.log(change.type, change.description || change.label);
     }
 }
 

@@ -8,13 +8,15 @@ import { getAIStatus } from './ai/claude-service.js';
 import { updateChunks } from './world/chunk-manager.js';
 import { createAmbientParticles } from './world/environment.js';
 import { npcs, updateNPCs } from './entities/npc.js';
-import { playerPos, updatePlayer, initInput } from './entities/player.js';
+import { Player } from './entities/player.js';
 import { updatePhysicsObjects, updateExplosions } from './entities/physics.js';
 import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey } from './systems/interaction.js';
 import { processWorldEvent } from './systems/world-events.js';
 import { initChat, isChatOpen, closeChat } from './ui/chat.js';
 import { initExamine, isExamineOpen, closeExamine } from './ui/examine.js';
 import { updateInfoBar } from './ui/hud.js';
+import { MusicManager } from './audio/music-manager.js';
+import { Scribe } from './systems/scribe.js';
 
 // =====================================================================
 // RENDERER SETUP
@@ -62,13 +64,16 @@ scene.add(ambientParticles);
 // =====================================================================
 let gameStarted = false;
 const clock = new THREE.Clock();
+const player = new Player();
+const scribe = new Scribe();
+const music = new MusicManager(scribe);
 
-initInput(camera, renderer);
+player.initInput(camera);
 
 const relockPointer = () => renderer.domElement.requestPointerLock();
 
 initChat(relockPointer, (npc, activity, playerMessage) => {
-    processWorldEvent(npc, activity, playerMessage, scene);
+    processWorldEvent(npc, activity, playerMessage, scene, player, scribe);
 });
 
 initExamine(relockPointer);
@@ -81,8 +86,8 @@ document.addEventListener('keydown', e => {
         else if (isExamineOpen()) closeExamine();
     }
     if (e.code === 'KeyE' && !isChatOpen() && !isExamineOpen()) handleInteractKey(scene);
-    if (e.code === 'KeyG') handleGrabKey(scene);
-    if (e.code === 'KeyV') handleVehicleKey();
+    if (e.code === 'KeyG') handleGrabKey(player, scene, scribe);
+    if (e.code === 'KeyV') handleVehicleKey(player, scribe);
 });
 
 // =====================================================================
@@ -92,18 +97,20 @@ function update() {
     const dt = Math.min(clock.getDelta(), 0.05);
     if (!gameStarted) return;
 
-    updatePlayer(dt, camera, scene);
-    updateChunks(playerPos, scene, npcs, sun, purpleGlow);
-    updateNPCs(dt, playerPos);
+    player.update(dt, camera, scene);
+    updateChunks(player.pos, scene, npcs, sun, purpleGlow);
+    updateNPCs(dt, player.pos);
     updatePhysicsObjects(dt);
     updateExplosions(dt, scene);
 
     // Particles follow player
-    ambientParticles.position.set(playerPos.x, 0, playerPos.z);
+    ambientParticles.position.set(player.pos.x, 0, player.pos.z);
     ambientParticles.rotation.y += 0.0003;
 
-    if (!isChatOpen() && !isExamineOpen()) updateInteraction(camera, scene);
-    updateInfoBar(playerPos, getAIStatus());
+    music.update(dt, player.pos);
+
+    if (!isChatOpen() && !isExamineOpen()) updateInteraction(camera, scene, player);
+    updateInfoBar(player.pos, getAIStatus());
 }
 
 function animate() {
@@ -118,6 +125,8 @@ function animate() {
 document.getElementById('start-btn').addEventListener('click', () => {
     document.getElementById('start-screen').style.display = 'none';
     renderer.domElement.requestPointerLock();
+    music.init();
+    music.resume();
     gameStarted = true;
     clock.start();
 });
@@ -135,6 +144,6 @@ window.addEventListener('resize', () => {
 });
 
 // Bootstrap
-updateChunks(playerPos, scene, npcs, sun, purpleGlow);
+updateChunks(player.pos, scene, npcs, sun, purpleGlow);
 camera.position.set(0, PLAYER.HEIGHT, 0);
 animate();

@@ -8,13 +8,32 @@ import os
 import re
 import uuid
 import threading
+import base64
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 GAME_DIR = Path(__file__).parent
+
+# Load .env file into os.environ
+_env_file = GAME_DIR / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _key, _, _val = _line.partition("=")
+            os.environ.setdefault(_key.strip(), _val.strip().strip('"'))
 ASSETS_DIR = GAME_DIR / "assets" / "generated"
-PROJECT_DIR = "/Users/neel.patel/Documents/extra/yc"  # Where .claude.json has blender MCP
-CLAUDE_BIN = "/Users/neel.patel/.local/bin/claude"
+MUSIC_DIR = GAME_DIR / "assets" / "music"
+PROJECT_DIR = str(GAME_DIR)  # Where .mcp.json has blender MCP
+CLAUDE_BIN = "/Users/darshpatel/.local/bin/claude"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+MUSIC_DIR.mkdir(parents=True, exist_ok=True)
+
+# Google AI config — uses GEMINI_API_KEY for both Gemini and Lyria
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+LYRIA_URL = "https://generativelanguage.googleapis.com/v1beta/models/lyria-002:predict"
 
 # Load CLAUDE_CONTEXT.md for injection into all prompts
 CONTEXT_FILE = GAME_DIR / "CLAUDE_CONTEXT.md"
@@ -81,6 +100,38 @@ Actually create and export the geometry. Do NOT just describe what to do."""
     print(f"  Asset job {job_id}: {'SUCCESS' if success else 'FAILED'} ({abs_output})")
 
 
+def generate_music_bg(job_id, prompt, output_path):
+    """Background thread: call Lyria via Google AI API to generate music."""
+    jobs[job_id]["status"] = "generating"
+    try:
+        payload = json.dumps({
+            "instances": [{"prompt": prompt}],
+            "parameters": {"sample_count": 1}
+        }).encode()
+
+        req = urllib.request.Request(
+            f"{LYRIA_URL}?key={GEMINI_API_KEY}",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+
+        audio_b64 = data["predictions"][0]["audioContent"]
+        with open(output_path, "wb") as f:
+            f.write(base64.b64decode(audio_b64))
+
+    except Exception as e:
+        print(f"  Music job {job_id}: FAILED — {e}")
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        return
+
+    jobs[job_id]["status"] = "done"
+    print(f"  Music job {job_id}: SUCCESS ({output_path})")
+
+
 class GameServer(http.server.SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         # Quieter logging
@@ -106,6 +157,12 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
             result = self.handle_generate_asset(body)
         elif self.path == '/api/asset-status':
             result = self.handle_asset_status(body)
+        elif self.path == '/api/generate-music-prompt':
+            result = self.handle_generate_music_prompt(body)
+        elif self.path == '/api/generate-music':
+            result = self.handle_generate_music(body)
+        elif self.path == '/api/music-status':
+            result = self.handle_music_status(body)
         else:
             result = {"error": "Unknown endpoint"}
 
@@ -196,6 +253,71 @@ Keep world_changes to 1-2 items max."""
 
     def handle_asset_status(self, body):
         """Check status of an asset generation job."""
+        job_id = body.get('job_id', '')
+        job = jobs.get(job_id, {"status": "unknown"})
+        return {"job_id": job_id, **job}
+
+    def handle_generate_music_prompt(self, body):
+        """Use Gemini to generate a Lyria music prompt from the scribe event log."""
+        environment = body.get('environment', 'city')
+        event_log = body.get('event_log', '')
+        print(f"  Music prompt request: env={environment}, events={len(event_log)} chars")
+
+        gemini_prompt = (
+            "You are a music director for an open-world video game. "
+            "Based on the player's current environment and recent events, "
+            "write a short music generation prompt (1-2 sentences, max 50 words) "
+            "for an AI music generator. The music should be instrumental only. "
+            "Respond with ONLY the music prompt text, nothing else.\n\n"
+            f"Current environment: {environment}\n"
+            f"Recent events:\n{event_log or 'Player is exploring quietly.'}"
+        )
+
+        try:
+            payload = json.dumps({
+                "contents": [{"parts": [{"text": gemini_prompt}]}]
+            }).encode()
+            req = urllib.request.Request(
+                f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+            prompt = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            print(f"  Gemini music prompt: {prompt[:80]}")
+            return {"prompt": prompt}
+        except Exception as e:
+            print(f"  Gemini music prompt failed: {e}")
+            fallback = {
+                "road": "Ambient urban nighttime synth, slow tempo, mysterious city streets",
+                "park": "Gentle nature ambience with soft piano, peaceful and serene",
+                "city": "Moody cyberpunk ambient, neon-lit alleyways, subtle bass pulse",
+            }
+            return {"prompt": fallback.get(environment, fallback["city"])}
+
+    def handle_generate_music(self, body):
+        """Start async music generation via Lyria."""
+        environment = body.get('environment', 'city')
+        prompt = body.get('prompt', 'ambient background music')
+        job_id = f"music_{environment}_{str(uuid.uuid4())[:6]}"
+        output_path = str(MUSIC_DIR / f"{job_id}.wav")
+
+        jobs[job_id] = {"status": "queued", "path": f"assets/music/{job_id}.wav"}
+        print(f"  Music generation started: {job_id} — {prompt[:60]}...")
+
+        thread = threading.Thread(
+            target=generate_music_bg,
+            args=(job_id, prompt, output_path),
+            daemon=True
+        )
+        thread.start()
+
+        return {"job_id": job_id, "status": "queued"}
+
+    def handle_music_status(self, body):
+        """Check status of a music generation job."""
         job_id = body.get('job_id', '')
         job = jobs.get(job_id, {"status": "unknown"})
         return {"job_id": job_id, **job}
