@@ -1,164 +1,168 @@
 // =====================================================================
-// Player Controller — first-person movement, grab/throw, driving
+// Player Class — first-person movement, grab/throw, driving
 // =====================================================================
 
 import * as THREE from 'three';
 import { PLAYER, PHYSICS } from '../config.js';
 import { notify } from '../ui/hud.js';
 
-export const playerPos = new THREE.Vector3(0, PLAYER.HEIGHT, 0);
-export const playerVel = new THREE.Vector3();
-export let yaw = 0, pitch = 0;
-
-let grounded = false;
-export let heldObject = null;
-export let inVehicle = null;
-const keys = {};
-
-// ---- Input Binding ----
-
-export function initInput(camera, renderer) {
-    document.addEventListener('keydown', e => { keys[e.code] = true; });
-    document.addEventListener('keyup', e => { keys[e.code] = false; });
-    document.addEventListener('mousemove', e => {
-        if (!document.pointerLockElement) return;
-        yaw -= e.movementX * 0.002;
-        pitch -= e.movementY * 0.002;
-        pitch = Math.max(-1.4, Math.min(1.4, pitch));
-    });
-    document.addEventListener('mousedown', e => {
-        if (e.button === 0 && heldObject) throwHeldObject(camera);
-    });
-}
-
-export function isKeyDown(code) { return !!keys[code]; }
-
-// ---- Update ----
-
-export function updatePlayer(dt, camera, scene) {
-    if (inVehicle) { updateDriving(dt, camera); return; }
-
-    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-    const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? PLAYER.RUN_SPEED : PLAYER.WALK_SPEED;
-
-    const move = new THREE.Vector3();
-    if (keys['KeyW'] || keys['ArrowUp']) move.add(forward);
-    if (keys['KeyS'] || keys['ArrowDown']) move.sub(forward);
-    if (keys['KeyA'] || keys['ArrowLeft']) move.sub(right);
-    if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
-
-    if (move.length() > 0) {
-        move.normalize().multiplyScalar(speed);
-        playerVel.x = move.x;
-        playerVel.z = move.z;
-    } else {
-        playerVel.x *= 0.8;
-        playerVel.z *= 0.8;
+export class Player {
+    constructor() {
+        this.pos = new THREE.Vector3(0, PLAYER.HEIGHT, 0);
+        this.vel = new THREE.Vector3();
+        this.yaw = 0;
+        this.pitch = 0;
+        this.grounded = false;
+        this.heldObject = null;
+        this.inVehicle = null;
+        this.keys = {};
     }
 
-    if (grounded && keys['Space']) { playerVel.y = PLAYER.JUMP_VEL; grounded = false; }
-    playerVel.y += PHYSICS.GRAVITY * dt;
-    playerPos.add(playerVel.clone().multiplyScalar(dt));
+    // ---- Input Binding ----
 
-    if (playerPos.y <= PLAYER.HEIGHT) {
-        playerPos.y = PLAYER.HEIGHT;
-        playerVel.y = 0;
-        grounded = true;
+    initInput(camera) {
+        document.addEventListener('keydown', e => { this.keys[e.code] = true; });
+        document.addEventListener('keyup', e => { this.keys[e.code] = false; });
+        document.addEventListener('mousemove', e => {
+            if (!document.pointerLockElement) return;
+            this.yaw -= e.movementX * 0.002;
+            this.pitch -= e.movementY * 0.002;
+            this.pitch = Math.max(-1.4, Math.min(1.4, this.pitch));
+        });
+        document.addEventListener('mousedown', e => {
+            if (e.button === 0 && this.heldObject) this.throwHeldObject(camera);
+        });
     }
 
-    // Building collision
-    scene.traverse(child => {
-        if (!child.userData.collidable) return;
-        const wp = new THREE.Vector3();
-        child.getWorldPosition(wp);
-        const hw = (child.userData.w || 2) / 2 + PLAYER.RADIUS;
-        const hd = (child.userData.d || 2) / 2 + PLAYER.RADIUS;
-        const dx = playerPos.x - wp.x, dz = playerPos.z - wp.z;
-        if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
-            const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
-            if (ox < oz) { playerPos.x += Math.sign(dx) * ox; playerVel.x = 0; }
-            else { playerPos.z += Math.sign(dz) * oz; playerVel.z = 0; }
+    isKeyDown(code) { return !!this.keys[code]; }
+
+    // ---- Update ----
+
+    update(dt, camera, scene) {
+        if (this.inVehicle) { this._updateDriving(dt, camera); return; }
+
+        const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+        const speed = (this.keys['ShiftLeft'] || this.keys['ShiftRight']) ? PLAYER.RUN_SPEED : PLAYER.WALK_SPEED;
+
+        const move = new THREE.Vector3();
+        if (this.keys['KeyW'] || this.keys['ArrowUp']) move.add(forward);
+        if (this.keys['KeyS'] || this.keys['ArrowDown']) move.sub(forward);
+        if (this.keys['KeyA'] || this.keys['ArrowLeft']) move.sub(right);
+        if (this.keys['KeyD'] || this.keys['ArrowRight']) move.add(right);
+
+        if (move.length() > 0) {
+            move.normalize().multiplyScalar(speed);
+            this.vel.x = move.x;
+            this.vel.z = move.z;
+        } else {
+            this.vel.x *= 0.8;
+            this.vel.z *= 0.8;
         }
-    });
 
-    // Camera
-    camera.position.set(playerPos.x, playerPos.y + 0.1, playerPos.z);
-    camera.rotation.order = 'YXZ';
-    camera.rotation.y = yaw;
-    camera.rotation.x = pitch;
+        if (this.grounded && this.keys['Space']) { this.vel.y = PLAYER.JUMP_VEL; this.grounded = false; }
+        this.vel.y += PHYSICS.GRAVITY * dt;
+        this.pos.add(this.vel.clone().multiplyScalar(dt));
 
-    // Held object
-    if (heldObject) {
-        const holdPos = new THREE.Vector3(0, -0.3, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
-        heldObject.position.lerp(holdPos, 12 * dt);
-        heldObject.rotation.y += dt * 2;
+        if (this.pos.y <= PLAYER.HEIGHT) {
+            this.pos.y = PLAYER.HEIGHT;
+            this.vel.y = 0;
+            this.grounded = true;
+        }
+
+        // Building collision
+        scene.traverse(child => {
+            if (!child.userData.collidable) return;
+            const wp = new THREE.Vector3();
+            child.getWorldPosition(wp);
+            const hw = (child.userData.w || 2) / 2 + PLAYER.RADIUS;
+            const hd = (child.userData.d || 2) / 2 + PLAYER.RADIUS;
+            const dx = this.pos.x - wp.x, dz = this.pos.z - wp.z;
+            if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+                const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+                if (ox < oz) { this.pos.x += Math.sign(dx) * ox; this.vel.x = 0; }
+                else { this.pos.z += Math.sign(dz) * oz; this.vel.z = 0; }
+            }
+        });
+
+        // Camera
+        camera.position.set(this.pos.x, this.pos.y + 0.1, this.pos.z);
+        camera.rotation.order = 'YXZ';
+        camera.rotation.y = this.yaw;
+        camera.rotation.x = this.pitch;
+
+        // Held object
+        if (this.heldObject) {
+            const holdPos = new THREE.Vector3(0, -0.3, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
+            this.heldObject.position.lerp(holdPos, 12 * dt);
+            this.heldObject.rotation.y += dt * 2;
+        }
     }
-}
 
-// ---- Driving ----
+    // ---- Driving ----
 
-function updateDriving(dt, camera) {
-    const v = inVehicle, d = v.userData;
-    if (keys['KeyW']) d.speed = Math.min(d.speed + 15 * dt, 25);
-    else if (keys['KeyS']) d.speed = Math.max(d.speed - 20 * dt, -8);
-    else d.speed *= 0.97;
-    if (keys['KeyA']) d.steer += 2.5 * dt;
-    if (keys['KeyD']) d.steer -= 2.5 * dt;
-    d.steer *= 0.9;
-    v.rotation.y += d.steer * dt * (Math.abs(d.speed) / 15);
-    const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
-    v.position.add(dir.multiplyScalar(d.speed * dt));
-    playerPos.copy(v.position);
-    playerPos.y = PLAYER.HEIGHT;
-    const camOff = new THREE.Vector3(0, 4, -8).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
-    camera.position.lerp(v.position.clone().add(camOff), 5 * dt);
-    camera.lookAt(v.position.x, v.position.y + 1, v.position.z);
-}
+    _updateDriving(dt, camera) {
+        const v = this.inVehicle, d = v.userData;
+        if (this.keys['KeyW']) d.speed = Math.min(d.speed + 15 * dt, 25);
+        else if (this.keys['KeyS']) d.speed = Math.max(d.speed - 20 * dt, -8);
+        else d.speed *= 0.97;
+        if (this.keys['KeyA']) d.steer += 2.5 * dt;
+        if (this.keys['KeyD']) d.steer -= 2.5 * dt;
+        d.steer *= 0.9;
+        v.rotation.y += d.steer * dt * (Math.abs(d.speed) / 15);
+        const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
+        v.position.add(dir.multiplyScalar(d.speed * dt));
+        this.pos.copy(v.position);
+        this.pos.y = PLAYER.HEIGHT;
+        const camOff = new THREE.Vector3(0, 4, -8).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
+        camera.position.lerp(v.position.clone().add(camOff), 5 * dt);
+        camera.lookAt(v.position.x, v.position.y + 1, v.position.z);
+    }
 
-// ---- Grab / Throw ----
+    // ---- Grab / Throw ----
 
-export function grabObject(obj, scene) {
-    if (heldObject) dropHeldObject();
-    heldObject = obj;
-    scene.attach(obj);
-    document.getElementById('held-item').textContent = `Holding: ${obj.userData.label}`;
-    document.getElementById('held-item').style.display = 'block';
-    document.getElementById('crosshair').className = 'grab';
-    notify(`Grabbed ${obj.userData.label}`);
-}
+    grabObject(obj, scene) {
+        if (this.heldObject) this.dropHeldObject();
+        this.heldObject = obj;
+        scene.attach(obj);
+        document.getElementById('held-item').textContent = `Holding: ${obj.userData.label}`;
+        document.getElementById('held-item').style.display = 'block';
+        document.getElementById('crosshair').className = 'grab';
+        notify(`Grabbed ${obj.userData.label}`);
+    }
 
-export function dropHeldObject() {
-    if (!heldObject) return;
-    document.getElementById('held-item').style.display = 'none';
-    document.getElementById('crosshair').className = '';
-    heldObject = null;
-}
+    dropHeldObject() {
+        if (!this.heldObject) return;
+        document.getElementById('held-item').style.display = 'none';
+        document.getElementById('crosshair').className = '';
+        this.heldObject = null;
+    }
 
-export function throwHeldObject(camera) {
-    if (!heldObject) return;
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    heldObject.userData.velocity = dir.multiplyScalar(PHYSICS.THROW_FORCE);
-    heldObject.userData.airborne = true;
-    notify(`Threw ${heldObject.userData.label}!`);
-    dropHeldObject();
-}
+    throwHeldObject(camera) {
+        if (!this.heldObject) return;
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        this.heldObject.userData.velocity = dir.multiplyScalar(PHYSICS.THROW_FORCE);
+        this.heldObject.userData.airborne = true;
+        notify(`Threw ${this.heldObject.userData.label}!`);
+        this.dropHeldObject();
+    }
 
-export function enterVehicle(vehicle) {
-    inVehicle = vehicle;
-    vehicle.userData.driving = true;
-    vehicle.userData.speed = 0;
-    vehicle.userData.steer = 0;
-    document.getElementById('vehicle-hud').style.display = 'block';
-    notify('Entered vehicle — WASD to drive');
-}
+    enterVehicle(vehicle) {
+        this.inVehicle = vehicle;
+        vehicle.userData.driving = true;
+        vehicle.userData.speed = 0;
+        vehicle.userData.steer = 0;
+        document.getElementById('vehicle-hud').style.display = 'block';
+        notify('Entered vehicle — WASD to drive');
+    }
 
-export function exitVehicle() {
-    if (!inVehicle) return;
-    inVehicle.userData.driving = false;
-    inVehicle.userData.speed = 0;
-    inVehicle = null;
-    document.getElementById('vehicle-hud').style.display = 'none';
-    playerPos.x += 2;
-    notify('Exited vehicle');
+    exitVehicle() {
+        if (!this.inVehicle) return;
+        this.inVehicle.userData.driving = false;
+        this.inVehicle.userData.speed = 0;
+        this.inVehicle = null;
+        document.getElementById('vehicle-hud').style.display = 'none';
+        this.pos.x += 2;
+        notify('Exited vehicle');
+    }
 }

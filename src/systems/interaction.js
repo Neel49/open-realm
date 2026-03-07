@@ -5,7 +5,6 @@
 import * as THREE from 'three';
 import { interactables } from '../world/chunk-manager.js';
 import { npcs, findNPCByMesh } from '../entities/npc.js';
-import { heldObject, grabObject, dropHeldObject, enterVehicle, exitVehicle, inVehicle } from '../entities/player.js';
 import { openChat, isChatOpen } from '../ui/chat.js';
 import { openExamine, isExamineOpen } from '../ui/examine.js';
 import { getNearbyContext } from '../utils.js';
@@ -14,7 +13,7 @@ const raycaster = new THREE.Raycaster();
 raycaster.far = 8;
 let lookedAtObject = null;
 
-export function updateInteraction(camera, scene) {
+export function updateInteraction(camera, scene, player) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const targets = [...interactables];
     for (const npc of npcs) targets.push(npc.mesh);
@@ -29,7 +28,7 @@ export function updateInteraction(camera, scene) {
         while (obj && !obj.userData.interactable && !obj.userData.type) obj = obj.parent;
         if (obj && obj.userData.type) {
             lookedAtObject = obj;
-            if (!heldObject) crosshair.className = 'active';
+            if (!player.heldObject) crosshair.className = 'active';
             const type = obj.userData.type;
             let text = '';
             if (type === 'npc') text = `<kbd>E</kbd> Talk to ${obj.userData.label}`;
@@ -42,7 +41,7 @@ export function updateInteraction(camera, scene) {
         }
     }
     prompt.style.display = 'none';
-    if (!heldObject) crosshair.className = '';
+    if (!player.heldObject) crosshair.className = '';
 }
 
 export function handleInteractKey(scene) {
@@ -56,12 +55,22 @@ export function handleInteractKey(scene) {
     }
 }
 
-export function handleGrabKey(scene) {
-    if (heldObject) { dropHeldObject(); return; }
-    if (lookedAtObject?.userData.grabbable) grabObject(lookedAtObject, scene);
+export function handleGrabKey(player, scene, scribe) {
+    if (player.heldObject) { player.dropHeldObject(); return; }
+    if (lookedAtObject?.userData.grabbable) {
+        player.grabObject(lookedAtObject, scene);
+        scribe.log('grab', `Grabbed ${lookedAtObject.userData.label}`);
+    }
 }
 
-export function handleVehicleKey() {
-    if (inVehicle) { exitVehicle(); return; }
-    if (lookedAtObject?.userData.drivable) enterVehicle(lookedAtObject);
+export function handleVehicleKey(player, scribe) {
+    if (player.inVehicle) {
+        scribe.log('vehicle', `Exited ${player.inVehicle.userData.label}`);
+        player.exitVehicle();
+        return;
+    }
+    if (lookedAtObject?.userData.drivable) {
+        player.enterVehicle(lookedAtObject);
+        scribe.log('vehicle', `Entered ${lookedAtObject.userData.label}`);
+    }
 }

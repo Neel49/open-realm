@@ -12,13 +12,21 @@ import threading
 import socketserver
 import time
 import base64
+import asyncio
+import wave
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+try:
+    from google import genai
+except ImportError:
+    genai = None
 
 GAME_DIR = Path(__file__).parent
 ASSETS_DIR = GAME_DIR / "assets" / "generated"
+MUSIC_DIR = GAME_DIR / "assets" / "music"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # Load .env
 env_file = GAME_DIR / ".env"
@@ -32,6 +40,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 BLENDER_HOST = "localhost"
 BLENDER_PORT = 9876
+LYRIA_MODEL = "models/lyria-realtime-exp"
+LYRIA_DURATION = 10
 
 # Load system context
 CONTEXT_FILE = GAME_DIR / "CLAUDE_CONTEXT.md"
@@ -582,6 +592,54 @@ Be strict -- a dark featureless box is a FAIL. A bright colorful building with t
 
 
 # =====================================================================
+# MUSIC GENERATION (Lyria)
+# =====================================================================
+async def _stream_lyria(prompt, output_path):
+    """Connect to Lyria realtime, stream audio for LYRIA_DURATION seconds, save as WAV."""
+    if not genai:
+        raise ImportError("google-genai package not installed")
+    client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
+    pcm_chunks = []
+    sample_rate = 48000
+    channels = 2
+    bytes_needed = sample_rate * channels * 2 * LYRIA_DURATION
+
+    async with client.aio.live.music.connect(model=LYRIA_MODEL) as session:
+        await session.set_weighted_prompts([{"text": prompt, "weight": 1.0}])
+        await session.play()
+        collected = 0
+        async for msg in session.receive():
+            if msg.server_content and msg.server_content.audio_chunks:
+                for chunk in msg.server_content.audio_chunks:
+                    if chunk.data:
+                        pcm_chunks.append(chunk.data)
+                        collected += len(chunk.data)
+            if collected >= bytes_needed:
+                break
+
+    pcm_data = b"".join(pcm_chunks)[:bytes_needed]
+    with wave.open(output_path, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(pcm_data)
+
+
+def generate_music_bg(job_id, prompt, output_path):
+    """Background thread: stream from Lyria realtime and save as WAV."""
+    jobs[job_id]["status"] = "generating"
+    try:
+        asyncio.run(_stream_lyria(prompt, output_path))
+    except Exception as e:
+        print(f"  Music job {job_id}: FAILED -- {e}")
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        return
+    jobs[job_id]["status"] = "done"
+    print(f"  Music job {job_id}: SUCCESS ({output_path})")
+
+
+# =====================================================================
 # HTTP SERVER
 # =====================================================================
 class GameServer(http.server.SimpleHTTPRequestHandler):
@@ -605,6 +663,9 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
             '/api/world-event': self.handle_world_event,
             '/api/generate-asset': self.handle_generate_asset,
             '/api/asset-status': self.handle_asset_status,
+            '/api/generate-music-prompt': self.handle_generate_music_prompt,
+            '/api/generate-music': self.handle_generate_music,
+            '/api/music-status': self.handle_music_status,
         }
 
         handler = handlers.get(self.path)
@@ -692,6 +753,41 @@ Keep world_changes to 1-3 items max."""
 
     def handle_asset_status(self, body):
         """Check asset generation job status."""
+        job_id = body.get('job_id', '')
+        job = jobs.get(job_id, {"status": "unknown"})
+        return {"job_id": job_id, **job}
+
+    def handle_generate_music_prompt(self, body):
+        """Use Gemini to generate a Lyria music prompt from the scribe event log."""
+        environment = body.get('environment', 'city')
+        event_log = body.get('event_log', '')
+        print(f"  Music prompt request: env={environment}")
+        prompt = (
+            "You are a music director for an open-world video game. "
+            "Based on the player's current environment and recent events, "
+            "write a short music generation prompt (1-2 sentences, max 50 words) "
+            "for an AI music generator. The music should be instrumental only. "
+            "Respond with ONLY the music prompt text, nothing else.\n\n"
+            f"Current environment: {environment}\n"
+            f"Recent events:\n{event_log or 'Player is exploring quietly.'}"
+        )
+        text = call_gemini(prompt, timeout=15)
+        return {"prompt": text.strip()[:200]}
+
+    def handle_generate_music(self, body):
+        """Start async music generation via Lyria."""
+        environment = body.get('environment', 'city')
+        prompt = body.get('prompt', 'ambient background music')
+        job_id = f"music_{environment}_{str(uuid.uuid4())[:6]}"
+        output_path = str(MUSIC_DIR / f"{job_id}.wav")
+        jobs[job_id] = {"status": "queued", "path": f"assets/music/{job_id}.wav"}
+        print(f"  Music generation started: {job_id}")
+        thread = threading.Thread(target=generate_music_bg, args=(job_id, prompt, output_path), daemon=True)
+        thread.start()
+        return {"job_id": job_id, "status": "queued"}
+
+    def handle_music_status(self, body):
+        """Check status of a music generation job."""
         job_id = body.get('job_id', '')
         job = jobs.get(job_id, {"status": "unknown"})
         return {"job_id": job_id, **job}
