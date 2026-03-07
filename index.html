@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Open Realm</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { overflow: hidden; background: #000; font-family: 'Segoe UI', system-ui, sans-serif; }
+canvas { display: block; }
+
+/* ===== HUD ===== */
+#hud { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+
+#crosshair {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 6px; height: 6px; border: 2px solid rgba(255,255,255,0.5); border-radius: 50%;
+    transition: all 0.15s;
+}
+#crosshair.active { width: 14px; height: 14px; border-color: #a855f7; background: rgba(168,85,247,0.2); }
+#crosshair.grab { border-color: #22d3ee; background: rgba(34,211,238,0.2); }
+
+#prompt {
+    position: absolute; bottom: 25%; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 8px;
+    font-size: 14px; backdrop-filter: blur(8px); display: none;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+#prompt kbd { background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 4px; font-size: 12px; margin: 0 2px; }
+
+#info-bar {
+    position: absolute; top: 20px; left: 20px; color: white; font-size: 13px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.8); opacity: 0.7;
+}
+
+#held-item {
+    position: absolute; bottom: 30px; right: 30px; background: rgba(0,0,0,0.6);
+    color: white; padding: 10px 16px; border-radius: 8px; display: none;
+    border: 1px solid rgba(168,85,247,0.3); font-size: 13px;
+}
+
+/* ===== CHAT ===== */
+#chat-panel {
+    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+    width: 520px; max-height: 450px; background: rgba(10,8,25,0.92);
+    border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+    backdrop-filter: blur(12px); display: none; pointer-events: all;
+    flex-direction: column; overflow: hidden;
+}
+#chat-header {
+    padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.08);
+    display: flex; justify-content: space-between; align-items: center;
+}
+#chat-header h3 { color: #a855f7; font-size: 15px; font-weight: 600; }
+#chat-header .close { color: rgba(255,255,255,0.4); cursor: pointer; font-size: 18px; }
+#chat-messages {
+    flex: 1; overflow-y: auto; padding: 12px 16px; max-height: 280px;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.msg { padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; max-width: 85%; word-wrap: break-word; }
+.msg.npc { background: rgba(168,85,247,0.15); color: #e2d4f0; align-self: flex-start; }
+.msg.player { background: rgba(34,211,238,0.15); color: #d4f0f0; align-self: flex-end; }
+.msg.system { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.4); align-self: center; font-style: italic; font-size: 12px; }
+.msg.thinking { color: rgba(255,255,255,0.3); }
+#chat-input-area {
+    padding: 12px; border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex; gap: 8px;
+}
+#chat-input {
+    flex: 1; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 8px 12px; color: white; font-size: 13px; outline: none;
+}
+#chat-input::placeholder { color: rgba(255,255,255,0.3); }
+#chat-send {
+    background: linear-gradient(135deg, #a855f7, #7c3aed); border: none; color: white;
+    padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+
+/* ===== EXAMINE PANEL ===== */
+#examine-panel {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 420px; background: rgba(10,8,25,0.95); border-radius: 12px;
+    border: 1px solid rgba(168,85,247,0.3); backdrop-filter: blur(12px);
+    display: none; pointer-events: all; padding: 20px;
+}
+#examine-panel h3 { color: #a855f7; margin-bottom: 10px; font-size: 16px; }
+#examine-panel .desc { color: rgba(255,255,255,0.7); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+#examine-panel .actions { display: flex; flex-direction: column; gap: 6px; }
+#examine-panel .actions button {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    color: white; padding: 10px 14px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; text-align: left; transition: all 0.15s;
+}
+#examine-panel .actions button:hover { background: rgba(168,85,247,0.2); border-color: rgba(168,85,247,0.4); }
+
+/* ===== NOTIFICATIONS ===== */
+#notifications {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+.notification {
+    background: rgba(10,8,25,0.85); color: white; padding: 10px 20px;
+    border-radius: 8px; font-size: 13px; border: 1px solid rgba(168,85,247,0.3);
+    animation: notifIn 0.3s ease, notifOut 0.3s ease 3.7s forwards;
+    max-width: 400px; text-align: center;
+}
+.notification.generating {
+    border-color: rgba(34,211,238,0.5);
+    animation: notifIn 0.3s ease, pulse 1.5s ease-in-out infinite;
+}
+@keyframes notifIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes notifOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+@keyframes pulse { 0%,100% { opacity: 0.8; } 50% { opacity: 1; } }
+
+/* ===== START SCREEN ===== */
+#start-screen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(135deg, #0f0c29, #1a1145, #0f0c29);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100;
+}
+#start-screen h1 {
+    font-size: 80px; font-weight: 800;
+    background: linear-gradient(135deg, #a855f7, #22d3ee, #a855f7);
+    background-size: 200% 200%; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    animation: shimmer 3s ease-in-out infinite; margin-bottom: 8px;
+}
+#start-screen .sub { color: rgba(255,255,255,0.4); font-size: 15px; margin-bottom: 6px; }
+#start-screen .powered { color: rgba(168,85,247,0.5); font-size: 12px; margin-bottom: 40px; }
+@keyframes shimmer { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+#start-btn {
+    padding: 16px 52px; font-size: 18px; border: none; border-radius: 50px;
+    background: linear-gradient(135deg, #a855f7, #22d3ee); color: white; cursor: pointer;
+    font-weight: 600; letter-spacing: 1px; transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 24px rgba(168,85,247,0.4);
+}
+#start-btn:hover { transform: scale(1.05); box-shadow: 0 6px 30px rgba(168,85,247,0.6); }
+.controls-info { color: rgba(255,255,255,0.3); font-size: 12px; margin-top: 30px; line-height: 2; text-align: center; }
+
+/* ===== VEHICLE HUD ===== */
+#vehicle-hud {
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.7); color: white; padding: 10px 24px; border-radius: 8px;
+    font-size: 14px; display: none; border: 1px solid rgba(34,211,238,0.3);
+}
+
+/* ===== GENERATING OVERLAY ===== */
+#generating-overlay {
+    position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
+    background: rgba(10,8,25,0.9); color: #22d3ee; padding: 14px 28px;
+    border-radius: 12px; font-size: 14px; display: none;
+    border: 1px solid rgba(34,211,238,0.3); backdrop-filter: blur(12px);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+#generating-overlay .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid rgba(34,211,238,0.3); border-top-color: #22d3ee;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-right: 8px; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+    <h1>Open Realm</h1>
+    <p class="sub">AI-Powered Open World &mdash; Every interaction is real</p>
+    <p class="powered">Powered by Claude Code + Blender MCP</p>
+    <button id="start-btn">ENTER WORLD</button>
+    <div class="controls-info">
+        WASD &mdash; Move &nbsp;|&nbsp; Mouse &mdash; Look &nbsp;|&nbsp; SPACE &mdash; Jump &nbsp;|&nbsp; SHIFT &mdash; Run<br>
+        E &mdash; Interact / Talk &nbsp;|&nbsp; G &mdash; Grab &nbsp;|&nbsp; Click &mdash; Throw &nbsp;|&nbsp; V &mdash; Enter Vehicle &nbsp;|&nbsp; ESC &mdash; Close
+    </div>
+</div>
+
+<div id="hud">
+    <div id="crosshair"></div>
+    <div id="prompt"></div>
+    <div id="info-bar"></div>
+    <div id="held-item"></div>
+    <div id="notifications"></div>
+</div>
+
+<div id="generating-overlay">
+    <span class="spinner"></span>
+    <span id="generating-text">Claude is shaping the world...</span>
+</div>
+
+<div id="chat-panel">
+    <div id="chat-header"><h3 id="chat-npc-name">NPC</h3><span class="close" id="chat-close">&times;</span></div>
+    <div id="chat-messages"></div>
+    <div id="chat-input-area">
+        <input id="chat-input" type="text" placeholder="Say something... (ask them to do anything!)" autocomplete="off">
+        <button id="chat-send">Send</button>
+    </div>
+</div>
+
+<div id="examine-panel">
+    <h3 id="examine-title">Object</h3>
+    <div class="desc" id="examine-desc">Loading...</div>
+    <div class="actions" id="examine-actions"></div>
+</div>
+
+<div id="vehicle-hud">WASD to drive &bull; V to exit</div>
+
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// =====================================================================
+// CONFIG
+// =====================================================================
+const API_BASE = '';  // Same origin as game (served from server.py)
+const CHUNK_SIZE = 40;
+const RENDER_DIST = 2;
+const GRAVITY = -20;
+const PLAYER_HEIGHT = 1.7;
+const PLAYER_RADIUS = 0.35;
+const WALK_SPEED = 5;
+const RUN_SPEED = 11;
+const JUMP_VEL = 8;
+const THROW_FORCE = 18;
+
+// =====================================================================
+// CLAUDE AI SERVICE (via local backend)
+// =====================================================================
+let aiCallsInFlight = 0;
+const aiCache = new Map();
+
+async function callClaude(endpoint, body) {
+    aiCallsInFlight++;
+    try {
+        const res = await fetch(`${API_BASE}/api/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        return await res.json();
+    } catch (e) {
+        console.error(`Claude API error (${endpoint}):`, e);
+        return { error: e.message, dialogue: 'Hmm...' };
+    } finally {
+        aiCallsInFlight--;
+    }
+}
+
+async function generateNPCProfile(seed) {
+    const cacheKey = `npc_${seed}`;
+    if (aiCache.has(cacheKey)) return aiCache.get(cacheKey);
+
+    const occupations = ['baker','mechanic','artist','musician','librarian','detective','chef','botanist','inventor','fisherman','blacksmith','alchemist','tailor','merchant','scholar','guard','healer','bard','explorer','astronomer'];
+    const occupation = occupations[Math.abs(seed) % occupations.length];
+
+    const result = await callClaude('chat', {
+        system: 'You generate game NPC data. Respond ONLY with valid JSON, no markdown, no backticks.',
+        prompt: `Create a unique NPC who is a ${occupation} in a fantasy open world city.
+Respond ONLY in JSON: {"name":"...","occupation":"...","personality":"one sentence","greeting":"short greeting under 15 words","hair_color":[r,g,b],"shirt_color":[r,g,b],"pants_color":[r,g,b]}
+Use color values 0.0-1.0. Be creative.`
+    });
+
+    const profile = result.name ? result : {
+        name: `Citizen #${Math.abs(seed) % 1000}`,
+        occupation, personality: 'A quiet local.', greeting: 'Hello there.',
+        hair_color: [0.1, 0.08, 0.05], shirt_color: [0.3, 0.3, 0.6], pants_color: [0.2, 0.2, 0.25]
+    };
+
+    aiCache.set(cacheKey, profile);
+    return profile;
+}
+
+async function chatWithNPC(npc, message) {
+    const history = npc.chatHistory.map(m => `${m.role}: ${m.text}`).join('\n');
+
+    const result = await callClaude('chat', {
+        system: `You are ${npc.profile.name}, a ${npc.profile.occupation}. Personality: ${npc.profile.personality}
+You are an NPC in "Open Realm", a living open-world game. Stay in character. Keep responses under 2 sentences.
+
+IMPORTANT: The player can ask you to DO things — bake a cake, go somewhere, build something, fight, trade, explore, etc.
+If the player suggests an ACTIVITY, set action to "world_event" so the game engine can make it happen.
+If it's just conversation, set action to "none".
+
+Respond ONLY with valid JSON (no markdown): {"dialogue":"your response","emotion":"neutral|happy|angry|scared|excited","action":"none|follow|wave|point|laugh|give_item|run_away|world_event","activity":"description of the activity if action is world_event, else null"}`,
+        prompt: `${history}\nPlayer: ${message}`
+    });
+
+    return result.dialogue ? result : { dialogue: "Hmm, I'm not sure what to say.", emotion: 'neutral', action: 'none', activity: null };
+}
+
+async function examineObject(obj) {
+    const label = obj.userData.label || obj.userData.type;
+    const result = await callClaude('chat', {
+        system: 'You are a creative game narrator for "Open Realm". Respond ONLY with valid JSON (no markdown).',
+        prompt: `The player examines a ${label} in an open-world city.
+Nearby: ${getNearbyContext(obj.position)}.
+Generate a vivid 2-sentence description and suggest 2-3 unique, creative interactions.
+JSON: {"description":"...","interactions":["action1","action2","action3"]}`
+    });
+    return result.description ? result : { description: `A ${label}.`, interactions: ['Examine closer', 'Leave'] };
+}
+
+async function resolveAction(obj, action) {
+    const result = await callClaude('chat', {
+        system: 'You are a creative game narrator. Respond ONLY with valid JSON (no markdown). Be surprising and fun.',
+        prompt: `Player chose to "${action}" a ${obj.userData.label || obj.userData.type}.
+What happens? JSON: {"result":"1-2 sentences of what happens","item_found":null or "item name","effect":"none|explode|glow|disappear|transform"}`
+    });
+    return result.result ? result : { result: 'Nothing happens.', item_found: null, effect: 'none' };
+}
+
+async function triggerWorldEvent(context, action) {
+    showGenerating('Claude is deciding what happens...');
+    const result = await callClaude('world-event', { context, action });
+    hideGenerating();
+    return result;
+}
+
+async function requestAssetGeneration(description, id) {
+    showGenerating(`Blender is creating: ${description.slice(0, 40)}...`);
+    const startResult = await callClaude('generate-asset', { description, id });
+    if (!startResult.job_id) { hideGenerating(); return null; }
+
+    // Poll until done
+    for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const status = await callClaude('asset-status', { job_id: startResult.job_id });
+        if (status.status === 'done') {
+            hideGenerating();
+            notify('New area created!');
+            return status.path;
+        }
+        if (status.status === 'failed') {
+            hideGenerating();
+            notify('Asset generation failed — using placeholder');
+            return null;
+        }
+        updateGenerating(`Blender is crafting the scene... (${i * 3}s)`);
+    }
+    hideGenerating();
+    return null;
+}
+
+function getNearbyContext(pos) {
+    const nearby = [];
+    scene.traverse(child => {
+        if (child.userData.type && child.position.distanceTo(pos) < 10) {
+            nearby.push(child.userData.label || child.userData.type);
+        }
+    });
+    return nearby.slice(0, 5).join(', ') || 'empty street';
+}
+
+// =====================================================================
+// THREE.JS SETUP
+// =====================================================================
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+scene.background = new THREE.Color(0x1e1040);
+scene.fog = new THREE.FogExp2(0x1e1040, 0.008);
+
+const sun = new THREE.DirectionalLight(0xffeedd, 2.5);
+sun.position.set(50, 80, 30);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 200;
+sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x6644aa, 0.5));
+scene.add(new THREE.HemisphereLight(0x9977cc, 0x334422, 0.4));
+const purpleGlow = new THREE.PointLight(0x8844ff, 2, 40);
+purpleGlow.position.set(0, 8, 0);
+scene.add(purpleGlow);
+
+// GLB Loader for dynamically generated assets
+const gltfLoader = new GLTFLoader();
+
+// =====================================================================
+// MATERIALS
+// =====================================================================
+function makeMat(color, roughness = 0.8) {
+    return new THREE.MeshStandardMaterial({ color, roughness, metalness: 0.05 });
+}
+const MAT = {
+    road: makeMat(0x2a2a30, 0.95),
+    sidewalk: makeMat(0x888888, 0.9),
+    grass: makeMat(0x2d6b30, 0.85),
+};
+const BUILDING_COLORS = [0xc4956a, 0xa8bdc4, 0xd4c5a0, 0x8b9e8b, 0xc49e9e, 0xb0a4c4, 0xd4b896, 0x9eaab0, 0xc4a882, 0xa0b4a0];
+const WINDOW_MAT = new THREE.MeshStandardMaterial({ color: 0x334466, emissive: 0x223344, emissiveIntensity: 0.5, roughness: 0.3, metalness: 0.5 });
+const WINDOW_LIT_MAT = new THREE.MeshStandardMaterial({ color: 0xffeeaa, emissive: 0xffcc44, emissiveIntensity: 1.5, roughness: 0.3 });
+
+// =====================================================================
+// SEEDED RANDOM
+// =====================================================================
+function seeded(seed) {
+    let s = seed;
+    return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+}
+
+// =====================================================================
+// WORLD GENERATION
+// =====================================================================
+const chunks = new Map();
+const npcs = [];
+const interactables = [];
+const physicsObjects = [];
+const dynamicAssets = []; // GLBs loaded at runtime
+
+function chunkKey(cx, cz) { return `${cx},${cz}`; }
+
+function generateChunk(cx, cz) {
+    const key = chunkKey(cx, cz);
+    if (chunks.has(key)) return;
+
+    const group = new THREE.Group();
+    group.userData.chunkKey = key;
+    const rng = seeded(cx * 73856093 ^ cz * 19349663);
+    const ox = cx * CHUNK_SIZE;
+    const oz = cz * CHUNK_SIZE;
+
+    // Ground
+    const groundGeo = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE);
+    const isRoadX = Math.abs(cx) % 3 === 0;
+    const isRoadZ = Math.abs(cz) % 3 === 0;
+    const isPark = !isRoadX && !isRoadZ && rng() < 0.15;
+    const groundMat = (isRoadX || isRoadZ) ? MAT.road : isPark ? MAT.grass : MAT.sidewalk;
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(ox, 0, oz);
+    ground.receiveShadow = true;
+    group.add(ground);
+
+    if (isRoadX || isRoadZ) {
+        const stripe = new THREE.Mesh(
+            new THREE.PlaneGeometry(isRoadX ? 0.15 : CHUNK_SIZE * 0.8, isRoadZ ? 0.15 : CHUNK_SIZE * 0.8),
+            new THREE.MeshBasicMaterial({ color: 0xcccc66 })
+        );
+        stripe.rotation.x = -Math.PI / 2;
+        stripe.position.set(ox, 0.01, oz);
+        group.add(stripe);
+    }
+
+    // Buildings
+    if (!isRoadX && !isRoadZ && !isPark) {
+        const numBuildings = Math.floor(rng() * 3) + 1;
+        for (let i = 0; i < numBuildings; i++) {
+            const bw = 4 + rng() * 8;
+            const bd = 4 + rng() * 8;
+            const bh = 5 + rng() * 25;
+            const bx = ox + (rng() - 0.5) * (CHUNK_SIZE - bw - 4);
+            const bz = oz + (rng() - 0.5) * (CHUNK_SIZE - bd - 4);
+            const color = BUILDING_COLORS[Math.floor(rng() * BUILDING_COLORS.length)];
+            group.add(createBuilding(bx, bz, bw, bh, bd, color, rng));
+        }
+    }
+
+    // Parks
+    if (isPark) {
+        for (let i = 0; i < 3 + Math.floor(rng() * 5); i++) {
+            group.add(createTree(ox + (rng() - 0.5) * (CHUNK_SIZE - 4), oz + (rng() - 0.5) * (CHUNK_SIZE - 4), rng));
+        }
+        for (let i = 0; i < 2; i++) {
+            const b = createProp('bench', ox + (rng() - 0.5) * 15, oz + (rng() - 0.5) * 15, rng);
+            group.add(b);
+            interactables.push(b);
+        }
+    }
+
+    // Street props & vehicles
+    if (isRoadX || isRoadZ) {
+        for (let i = 0; i < 2; i++) group.add(createStreetLight(ox + (rng() - 0.5) * 30, oz + (rng() - 0.5) * 30));
+        const propTypes = ['crate', 'barrel', 'trashcan', 'cone', 'hydrant'];
+        for (let i = 0; i < Math.floor(rng() * 4); i++) {
+            const p = createProp(propTypes[Math.floor(rng() * propTypes.length)], ox + (rng() - 0.5) * 30, oz + (rng() - 0.5) * 30, rng);
+            group.add(p);
+            interactables.push(p);
+            if (p.userData.grabbable) physicsObjects.push(p);
+        }
+        if (rng() < 0.35) {
+            const car = createVehicle(ox + (rng() - 0.5) * 20, oz + (rng() - 0.5) * 20, rng);
+            group.add(car);
+            interactables.push(car);
+        }
+    }
+
+    // NPCs
+    if (!isRoadX && !isRoadZ && rng() < 0.6) {
+        for (let i = 0; i < Math.floor(rng() * 2) + 1; i++) {
+            spawnNPC(ox + (rng() - 0.5) * 20, oz + (rng() - 0.5) * 20, cx * 1000 + cz * 100 + i, group);
+        }
+    }
+
+    scene.add(group);
+    chunks.set(key, group);
+}
+
+function unloadChunk(key) {
+    const group = chunks.get(key);
+    if (!group) return;
+    for (let i = npcs.length - 1; i >= 0; i--) {
+        if (npcs[i].chunkKey === key) { scene.remove(npcs[i].mesh); npcs.splice(i, 1); }
+    }
+    group.traverse(child => {
+        let idx = interactables.indexOf(child);
+        if (idx !== -1) interactables.splice(idx, 1);
+        idx = physicsObjects.indexOf(child);
+        if (idx !== -1) physicsObjects.splice(idx, 1);
+    });
+    scene.remove(group);
+    chunks.delete(key);
+}
+
+function updateChunks(pos) {
+    const pcx = Math.round(pos.x / CHUNK_SIZE);
+    const pcz = Math.round(pos.z / CHUNK_SIZE);
+    for (let dx = -RENDER_DIST; dx <= RENDER_DIST; dx++)
+        for (let dz = -RENDER_DIST; dz <= RENDER_DIST; dz++)
+            generateChunk(pcx + dx, pcz + dz);
+    for (const [key] of chunks) {
+        const [cx, cz] = key.split(',').map(Number);
+        if (Math.abs(cx - pcx) > RENDER_DIST + 1 || Math.abs(cz - pcz) > RENDER_DIST + 1) unloadChunk(key);
+    }
+    sun.position.set(pos.x + 50, 80, pos.z + 30);
+    sun.target.position.copy(pos);
+    sun.target.updateMatrixWorld();
+    purpleGlow.position.set(pos.x, 8, pos.z);
+}
+
+// =====================================================================
+// BUILDING GENERATOR
+// =====================================================================
+function createBuilding(x, z, w, h, d, color, rng) {
+    const group = new THREE.Group();
+    group.userData = { type: 'building', label: `${Math.floor(h)}m tall building`, collidable: true, w, d };
+    group.position.set(x, 0, z);
+
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), makeMat(color, 0.7));
+    mesh.position.y = h / 2;
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    group.add(mesh);
+
+    // Windows
+    const winGeo = new THREE.PlaneGeometry(1, 1.4);
+    for (let row = 0; row < Math.floor(h / 3); row++) {
+        const wy = 2 + row * 3;
+        for (let col = 0; col < Math.floor(w / 2.5); col++) {
+            const wx = -w / 2 + 1.5 + col * 2.5;
+            const wMat = rng() < 0.4 ? WINDOW_LIT_MAT : WINDOW_MAT;
+            const wf = new THREE.Mesh(winGeo, wMat);
+            wf.position.set(wx, wy, d / 2 + 0.01);
+            group.add(wf);
+            const wb = new THREE.Mesh(winGeo, wMat);
+            wb.position.set(wx, wy, -d / 2 - 0.01);
+            wb.rotation.y = Math.PI;
+            group.add(wb);
+        }
+    }
+
+    // Door
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.5), makeMat(0x443322, 0.6));
+    door.position.set(0, 1.25, d / 2 + 0.02);
+    door.userData = { type: 'door', label: 'Building entrance', interactable: true };
+    group.add(door);
+    interactables.push(door);
+
+    return group;
+}
+
+function createTree(x, z, rng) {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.userData = { type: 'tree', label: 'Tree' };
+    const trunkH = 2 + rng() * 2;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, trunkH, 6), makeMat(0x4a3520, 0.9));
+    trunk.position.y = trunkH / 2; trunk.castShadow = true;
+    g.add(trunk);
+    const leafR = 1 + rng() * 1.5;
+    const leaves = new THREE.Mesh(new THREE.SphereGeometry(leafR, 8, 6), makeMat(0x2d7a30 + Math.floor(rng() * 0x102000), 0.7));
+    leaves.position.y = trunkH + leafR * 0.5; leaves.castShadow = true;
+    g.add(leaves);
+    return g;
+}
+
+function createStreetLight(x, z) {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.userData = { type: 'streetlight', label: 'Street light', collidable: true, w: 0.3, d: 0.3 };
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 5, 6), makeMat(0x555555, 0.7));
+    pole.position.y = 2.5; pole.castShadow = true;
+    g.add(pole);
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8),
+        new THREE.MeshStandardMaterial({ color: 0xffeedd, emissive: 0xffcc88, emissiveIntensity: 2 })));
+    g.children[1].position.y = 5.2;
+    const light = new THREE.PointLight(0xffddaa, 3, 15);
+    light.position.y = 5;
+    g.add(light);
+    return g;
+}
+
+function createProp(type, x, z, rng) {
+    let mesh;
+    const data = { type, interactable: true, grabbable: false };
+    switch (type) {
+        case 'crate': mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), makeMat(0x8b6b3d, 0.9));
+            mesh.position.set(x, 0.4, z); data.label = 'Wooden crate'; data.grabbable = true; break;
+        case 'barrel': mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.9, 10), makeMat(0x6b4423, 0.85));
+            mesh.position.set(x, 0.45, z); data.label = 'Barrel'; data.grabbable = true; break;
+        case 'trashcan': mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.3, 0.8, 8), makeMat(0x444444, 0.7));
+            mesh.position.set(x, 0.4, z); data.label = 'Trash can'; data.grabbable = true; break;
+        case 'cone': mesh = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.6, 8), makeMat(0xff6622, 0.6));
+            mesh.position.set(x, 0.3, z); data.label = 'Traffic cone'; data.grabbable = true; break;
+        case 'hydrant': {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.6, 8), makeMat(0xcc2222, 0.5)));
+            g.children[0].position.y = 0.3; g.position.set(x, 0, z);
+            mesh = g; data.label = 'Fire hydrant'; data.collidable = true; data.w = 0.4; data.d = 0.4; break;
+        }
+        case 'bench': {
+            const g = new THREE.Group();
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.08, 0.5), makeMat(0x6b4423)));
+            g.children[0].position.y = 0.45;
+            g.add(new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.5, 0.06), makeMat(0x6b4423)));
+            g.children[1].position.set(0, 0.7, -0.22);
+            g.position.set(x, 0, z); g.rotation.y = rng() * Math.PI;
+            mesh = g; data.label = 'Park bench'; break;
+        }
+        default: mesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), makeMat(0x888888));
+            mesh.position.set(x, 0.25, z); data.label = 'Object';
+    }
+    mesh.userData = data;
+    mesh.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+    return mesh;
+}
+
+function createVehicle(x, z, rng) {
+    const g = new THREE.Group();
+    const color = [0xcc3333, 0x3333cc, 0x33aa33, 0xcccc33, 0xeeeeee, 0x222222][Math.floor(rng() * 6)];
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 4), makeMat(color, 0.4));
+    body.position.y = 0.6; body.castShadow = true;
+    g.add(body);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 2), makeMat(color, 0.4));
+    roof.position.set(0, 1.3, -0.3); roof.castShadow = true;
+    g.add(roof);
+    const ws = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.55),
+        new THREE.MeshStandardMaterial({ color: 0x88aacc, transparent: true, opacity: 0.6, roughness: 0.1 }));
+    ws.position.set(0, 1.2, 0.72); ws.rotation.x = -0.2;
+    g.add(ws);
+    const wg = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 12);
+    const wm = makeMat(0x111111, 0.95);
+    for (const [wx, wz] of [[-1, 1.2], [1, 1.2], [-1, -1.2], [1, -1.2]]) {
+        const w = new THREE.Mesh(wg, wm);
+        w.position.set(wx, 0.3, wz); w.rotation.z = Math.PI / 2;
+        g.add(w);
+    }
+    g.position.set(x, 0, z);
+    g.rotation.y = rng() * Math.PI * 2;
+    g.userData = { type: 'vehicle', label: 'Car', interactable: true, drivable: true,
+        collidable: true, w: 2.2, d: 4.2, speed: 0, steer: 0, driving: false };
+    return g;
+}
+
+// =====================================================================
+// NPC SYSTEM
+// =====================================================================
+function createHumanoid(colors) {
+    const g = new THREE.Group();
+    const skinMat = makeMat(0xe8c9a0, 0.5);
+    const hairMat = makeMat(new THREE.Color(...(colors.hair_color || [0.1, 0.08, 0.05])), 0.6);
+    const shirtMat = makeMat(new THREE.Color(...(colors.shirt_color || [0.3, 0.3, 0.6])), 0.6);
+    const pantsMat = makeMat(new THREE.Color(...(colors.pants_color || [0.2, 0.2, 0.25])), 0.7);
+
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), skinMat)); // head
+    g.children[0].position.y = 1.55;
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.19, 10, 8), hairMat)); // hair
+    g.children[1].position.y = 1.62; g.children[1].scale.set(1, 0.7, 1);
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.25), shirtMat)); // body
+    g.children[2].position.y = 1.15;
+    for (const side of [-0.1, 0.1]) {
+        g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.7, 6), pantsMat));
+        g.children[g.children.length - 1].position.set(side, 0.55, 0);
+    }
+    for (const side of [-0.27, 0.27]) {
+        g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 6), shirtMat));
+        g.children[g.children.length - 1].position.set(side, 1.1, 0);
+    }
+    for (const side of [-0.1, 0.1]) {
+        g.add(new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.16), makeMat(0x222222)));
+        g.children[g.children.length - 1].position.set(side, 0.22, 0.02);
+    }
+    g.traverse(c => { if (c.isMesh) c.castShadow = true; });
+    return g;
+}
+
+async function spawnNPC(x, z, seed, chunkGroup) {
+    const profile = await generateNPCProfile(seed);
+    const mesh = createHumanoid(profile);
+    mesh.position.set(x, 0, z);
+    mesh.userData = { type: 'npc', label: profile.name, interactable: true };
+
+    // Name label
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(profile.name, 128, 40);
+    const tex = new THREE.CanvasTexture(canvas);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.8 }));
+    sprite.position.y = 2.0;
+    sprite.scale.set(2, 0.5, 1);
+    mesh.add(sprite);
+
+    const npc = {
+        mesh, profile, seed,
+        chatHistory: [],
+        chunkKey: chunkGroup.userData.chunkKey,
+        originX: x, originZ: z,
+        walkTarget: new THREE.Vector3(x, 0, z),
+        walkTimer: 0,
+        emotion: 'neutral',
+        following: false
+    };
+
+    chunkGroup.add(mesh);
+    npcs.push(npc);
+    interactables.push(mesh);
+}
+
+function updateNPCs(dt) {
+    for (const npc of npcs) {
+        if (npc.following) {
+            // Follow player
+            const dir = new THREE.Vector3().subVectors(playerPos, npc.mesh.position);
+            dir.y = 0;
+            if (dir.length() > 3) {
+                dir.normalize().multiplyScalar(4 * dt);
+                npc.mesh.position.add(dir);
+                npc.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+                npc.mesh.position.y = Math.sin(Date.now() * 0.008) * 0.04;
+            }
+            continue;
+        }
+
+        npc.walkTimer -= dt;
+        if (npc.walkTimer <= 0) {
+            npc.walkTarget.set(npc.originX + (Math.random() - 0.5) * 10, 0, npc.originZ + (Math.random() - 0.5) * 10);
+            npc.walkTimer = 3 + Math.random() * 5;
+        }
+        const dir = new THREE.Vector3().subVectors(npc.walkTarget, npc.mesh.position);
+        dir.y = 0;
+        if (dir.length() > 0.5) {
+            dir.normalize().multiplyScalar(1.2 * dt);
+            npc.mesh.position.add(dir);
+            npc.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+            npc.mesh.position.y = Math.sin(Date.now() * 0.008) * 0.04;
+        }
+    }
+}
+
+// =====================================================================
+// PLAYER
+// =====================================================================
+const playerPos = new THREE.Vector3(0, PLAYER_HEIGHT, 0);
+const playerVel = new THREE.Vector3();
+let yaw = 0, pitch = 0, grounded = false;
+const keys = {};
+let heldObject = null;
+let inVehicle = null;
+
+document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Escape') closeAllPanels();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+document.addEventListener('mousemove', e => {
+    if (!document.pointerLockElement || !gameStarted) return;
+    yaw -= e.movementX * 0.002;
+    pitch -= e.movementY * 0.002;
+    pitch = Math.max(-1.4, Math.min(1.4, pitch));
+});
+document.addEventListener('mousedown', e => {
+    if (e.button === 0 && heldObject && gameStarted) throwHeldObject();
+});
+
+function updatePlayer(dt) {
+    if (inVehicle) { updateDriving(dt); return; }
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const right = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? RUN_SPEED : WALK_SPEED;
+    const move = new THREE.Vector3();
+    if (keys['KeyW'] || keys['ArrowUp']) move.add(forward);
+    if (keys['KeyS'] || keys['ArrowDown']) move.sub(forward);
+    if (keys['KeyA'] || keys['ArrowLeft']) move.sub(right);
+    if (keys['KeyD'] || keys['ArrowRight']) move.add(right);
+    if (move.length() > 0) { move.normalize().multiplyScalar(speed); playerVel.x = move.x; playerVel.z = move.z; }
+    else { playerVel.x *= 0.8; playerVel.z *= 0.8; }
+    if (grounded && keys['Space']) { playerVel.y = JUMP_VEL; grounded = false; }
+    playerVel.y += GRAVITY * dt;
+    playerPos.add(playerVel.clone().multiplyScalar(dt));
+    if (playerPos.y <= PLAYER_HEIGHT) { playerPos.y = PLAYER_HEIGHT; playerVel.y = 0; grounded = true; }
+
+    // Building collision
+    scene.traverse(child => {
+        if (!child.userData.collidable) return;
+        const wp = new THREE.Vector3(); child.getWorldPosition(wp);
+        const hw = (child.userData.w || 2) / 2 + PLAYER_RADIUS;
+        const hd = (child.userData.d || 2) / 2 + PLAYER_RADIUS;
+        const dx = playerPos.x - wp.x, dz = playerPos.z - wp.z;
+        if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+            const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+            if (ox < oz) { playerPos.x += Math.sign(dx) * ox; playerVel.x = 0; }
+            else { playerPos.z += Math.sign(dz) * oz; playerVel.z = 0; }
+        }
+    });
+
+    camera.position.set(playerPos.x, playerPos.y + 0.1, playerPos.z);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = yaw;
+    camera.rotation.x = pitch;
+
+    if (heldObject) {
+        const holdPos = new THREE.Vector3(0, -0.3, -1.5).applyQuaternion(camera.quaternion).add(camera.position);
+        heldObject.position.lerp(holdPos, 12 * dt);
+        heldObject.rotation.y += dt * 2;
+    }
+}
+
+function updateDriving(dt) {
+    const v = inVehicle, d = v.userData;
+    if (keys['KeyW']) d.speed = Math.min(d.speed + 15 * dt, 25);
+    else if (keys['KeyS']) d.speed = Math.max(d.speed - 20 * dt, -8);
+    else d.speed *= 0.97;
+    if (keys['KeyA']) d.steer += 2.5 * dt;
+    if (keys['KeyD']) d.steer -= 2.5 * dt;
+    d.steer *= 0.9;
+    v.rotation.y += d.steer * dt * (Math.abs(d.speed) / 15);
+    const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
+    v.position.add(dir.multiplyScalar(d.speed * dt));
+    playerPos.copy(v.position); playerPos.y = PLAYER_HEIGHT;
+    const camOff = new THREE.Vector3(0, 4, -8).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
+    camera.position.lerp(v.position.clone().add(camOff), 5 * dt);
+    camera.lookAt(v.position.x, v.position.y + 1, v.position.z);
+}
+
+// =====================================================================
+// GRAB / THROW
+// =====================================================================
+function grabObject(obj) {
+    if (heldObject) dropHeldObject();
+    heldObject = obj;
+    scene.attach(obj);
+    document.getElementById('held-item').textContent = `Holding: ${obj.userData.label}`;
+    document.getElementById('held-item').style.display = 'block';
+    document.getElementById('crosshair').className = 'grab';
+    notify(`Grabbed ${obj.userData.label}`);
+}
+function dropHeldObject() {
+    if (!heldObject) return;
+    document.getElementById('held-item').style.display = 'none';
+    document.getElementById('crosshair').className = '';
+    heldObject = null;
+}
+function throwHeldObject() {
+    if (!heldObject) return;
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    heldObject.userData.velocity = dir.multiplyScalar(THROW_FORCE);
+    heldObject.userData.airborne = true;
+    notify(`Threw ${heldObject.userData.label}!`);
+    dropHeldObject();
+}
+function updatePhysicsObjects(dt) {
+    for (const obj of physicsObjects) {
+        if (!obj.userData.airborne) continue;
+        const v = obj.userData.velocity;
+        v.y += GRAVITY * dt;
+        obj.position.add(v.clone().multiplyScalar(dt));
+        obj.rotation.x += dt * 5; obj.rotation.z += dt * 3;
+        if (obj.position.y <= 0.4) { obj.position.y = 0.4; v.set(0, 0, 0); obj.userData.airborne = false; }
+    }
+}
+
+// =====================================================================
+// INTERACTION SYSTEM
+// =====================================================================
+const raycaster = new THREE.Raycaster();
+raycaster.far = 8;
+let lookedAtObject = null;
+let chatNPC = null;
+
+function updateInteraction() {
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const allMeshes = [];
+    scene.traverse(c => { if ((c.isMesh || c.isGroup) && c.userData.interactable) allMeshes.push(c); });
+    for (const npc of npcs) allMeshes.push(npc.mesh);
+
+    const intersects = raycaster.intersectObjects(allMeshes, true);
+    lookedAtObject = null;
+    const prompt = document.getElementById('prompt');
+    const crosshair = document.getElementById('crosshair');
+
+    if (intersects.length > 0) {
+        let obj = intersects[0].object;
+        while (obj && !obj.userData.interactable && !obj.userData.type) obj = obj.parent;
+        if (obj && obj.userData.type) {
+            lookedAtObject = obj;
+            if (!heldObject) crosshair.className = 'active';
+            const type = obj.userData.type;
+            let text = '';
+            if (type === 'npc') text = `<kbd>E</kbd> Talk to ${obj.userData.label}`;
+            else if (type === 'vehicle') text = `<kbd>V</kbd> Enter ${obj.userData.label}`;
+            else if (obj.userData.grabbable) text = `<kbd>E</kbd> Examine &nbsp; <kbd>G</kbd> Grab`;
+            else text = `<kbd>E</kbd> Examine ${obj.userData.label}`;
+            prompt.innerHTML = text;
+            prompt.style.display = 'block';
+            return;
+        }
+    }
+    prompt.style.display = 'none';
+    if (!heldObject) crosshair.className = '';
+}
+
+function handleInteractKey() {
+    if (!lookedAtObject) return;
+    if (lookedAtObject.userData.type === 'npc') {
+        const npc = npcs.find(n => n.mesh === lookedAtObject);
+        if (npc) openChat(npc);
+    } else {
+        openExamine(lookedAtObject);
+    }
+}
+function handleGrabKey() {
+    if (heldObject) { dropHeldObject(); return; }
+    if (lookedAtObject?.userData.grabbable) grabObject(lookedAtObject);
+}
+function handleVehicleKey() {
+    if (inVehicle) {
+        inVehicle.userData.driving = false; inVehicle.userData.speed = 0;
+        inVehicle = null;
+        document.getElementById('vehicle-hud').style.display = 'none';
+        playerPos.x += 2;
+        notify('Exited vehicle');
+        return;
+    }
+    if (lookedAtObject?.userData.drivable) {
+        inVehicle = lookedAtObject;
+        inVehicle.userData.driving = true; inVehicle.userData.speed = 0; inVehicle.userData.steer = 0;
+        document.getElementById('vehicle-hud').style.display = 'block';
+        notify('Entered vehicle — WASD to drive');
+    }
+}
+
+document.addEventListener('keydown', e => {
+    if (!gameStarted) return;
+    if (e.code === 'KeyE' && !chatOpen && !examineOpen) handleInteractKey();
+    if (e.code === 'KeyG') handleGrabKey();
+    if (e.code === 'KeyV') handleVehicleKey();
+});
+
+// =====================================================================
+// CHAT + WORLD EVENT SYSTEM
+// =====================================================================
+let chatOpen = false;
+
+function openChat(npc) {
+    chatNPC = npc;
+    chatOpen = true;
+    document.getElementById('chat-panel').style.display = 'flex';
+    document.getElementById('chat-npc-name').textContent = `${npc.profile.name} — ${npc.profile.occupation}`;
+    document.getElementById('chat-messages').innerHTML = '';
+    document.exitPointerLock();
+    if (npc.chatHistory.length === 0) {
+        addChatMsg('npc', npc.profile.greeting);
+        npc.chatHistory.push({ role: 'NPC', text: npc.profile.greeting });
+    } else {
+        for (const msg of npc.chatHistory) addChatMsg(msg.role === 'NPC' ? 'npc' : 'player', msg.text);
+    }
+    setTimeout(() => document.getElementById('chat-input').focus(), 100);
+}
+function closeChat() {
+    chatOpen = false; chatNPC = null;
+    document.getElementById('chat-panel').style.display = 'none';
+    renderer.domElement.requestPointerLock();
+}
+function addChatMsg(type, text) {
+    const msgs = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = `msg ${type}`;
+    div.textContent = text;
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+}
+
+async function sendChat() {
+    if (!chatNPC) return;
+    const input = document.getElementById('chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    addChatMsg('player', text);
+    chatNPC.chatHistory.push({ role: 'Player', text });
+
+    const thinkingDiv = addChatMsg('npc', '...');
+    thinkingDiv.classList.add('thinking');
+
+    const response = await chatWithNPC(chatNPC, text);
+
+    thinkingDiv.textContent = response.dialogue;
+    thinkingDiv.classList.remove('thinking');
+    chatNPC.chatHistory.push({ role: 'NPC', text: response.dialogue });
+    chatNPC.emotion = response.emotion || 'neutral';
+
+    // Handle NPC actions
+    if (response.action && response.action !== 'none') {
+        await handleNPCAction(chatNPC, response.action, response.activity, text);
+    }
+}
+
+async function handleNPCAction(npc, action, activity, playerMessage) {
+    if (action === 'follow') {
+        npc.following = true;
+        addChatMsg('system', `${npc.profile.name} starts following you`);
+        notify(`${npc.profile.name} is following you`);
+    } else if (action === 'run_away') {
+        const dir = new THREE.Vector3().subVectors(npc.mesh.position, playerPos).normalize();
+        npc.walkTarget.copy(npc.mesh.position).add(dir.multiplyScalar(15));
+        npc.walkTimer = 5;
+        addChatMsg('system', `${npc.profile.name} runs away!`);
+    } else if (action === 'wave' || action === 'laugh' || action === 'point') {
+        addChatMsg('system', `${npc.profile.name} ${action}s`);
+    } else if (action === 'give_item') {
+        addChatMsg('system', `${npc.profile.name} gives you something`);
+        notify('Received an item!');
+    } else if (action === 'world_event') {
+        // THE BIG ONE: trigger world generation
+        addChatMsg('system', 'Something is about to happen...');
+        closeChat();
+
+        const context = `Player is at position (${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)}) talking to ${npc.profile.name} (${npc.profile.occupation}). Nearby: ${getNearbyContext(playerPos)}.`;
+        const eventResult = await triggerWorldEvent(context, `Player said: "${playerMessage}". NPC (${npc.profile.name}) agreed to: ${activity || playerMessage}`);
+
+        if (eventResult.narrative) notify(eventResult.narrative);
+        if (eventResult.npc_dialogue) {
+            npc.chatHistory.push({ role: 'NPC', text: eventResult.npc_dialogue });
+        }
+
+        // Process world changes
+        if (eventResult.world_changes) {
+            for (const change of eventResult.world_changes) {
+                await processWorldChange(change, npc);
+            }
+        }
+
+        // NPC follows to new location
+        npc.following = true;
+    }
+}
+
+async function processWorldChange(change, npc) {
+    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+    const spawnPos = playerPos.clone().add(forward.multiplyScalar(15));
+    spawnPos.y = 0;
+
+    if (change.type === 'spawn_building' || change.type === 'spawn_object') {
+        // First, try to generate a real Blender asset
+        const assetId = `gen_${Date.now()}`;
+        const assetPath = await requestAssetGeneration(change.description, assetId);
+
+        if (assetPath) {
+            // Load the generated GLB
+            try {
+                const gltf = await new Promise((resolve, reject) => {
+                    gltfLoader.load(assetPath, resolve, undefined, reject);
+                });
+                const model = gltf.scene;
+                model.position.copy(spawnPos);
+                model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+                model.userData = { type: 'generated', label: change.label || 'Generated area', interactable: true, collidable: true, w: 8, d: 8 };
+                scene.add(model);
+                dynamicAssets.push(model);
+                interactables.push(model);
+
+                // Add label
+                const canvas = document.createElement('canvas');
+                canvas.width = 512; canvas.height = 64;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'rgba(0,0,0,0.6)';
+                ctx.fillRect(0, 0, 512, 64);
+                ctx.fillStyle = '#22d3ee';
+                ctx.font = 'bold 28px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(change.label || 'New Location', 256, 42);
+                const tex = new THREE.CanvasTexture(canvas);
+                const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
+                sprite.position.y = 8;
+                sprite.scale.set(5, 0.7, 1);
+                model.add(sprite);
+
+                notify(`${change.label} has appeared!`);
+            } catch (e) {
+                console.error('Failed to load generated asset:', e);
+                placePlaceholderBuilding(spawnPos, change);
+            }
+        } else {
+            // Fallback: place a placeholder building
+            placePlaceholderBuilding(spawnPos, change);
+        }
+    } else if (change.type === 'spawn_npc') {
+        // Spawn a new NPC at the location
+        const fakeChunk = { userData: { chunkKey: 'dynamic' } };
+        scene.add(fakeChunk);
+        spawnNPC(spawnPos.x, spawnPos.z, Date.now(), fakeChunk);
+        notify(`A new person appears: ${change.label || 'someone'}`);
+    } else if (change.type === 'teleport_player') {
+        playerPos.add(forward.multiplyScalar(10));
+        notify(`You travel to ${change.label || 'a new area'}`);
+    } else if (change.type === 'weather_change') {
+        notify(`The weather changes: ${change.description}`);
+        // Could modify fog/lighting here
+    } else if (change.type === 'modify_area') {
+        notify(change.description);
+    }
+}
+
+function placePlaceholderBuilding(pos, change) {
+    // Create a colorful placeholder building
+    const rng = seeded(Date.now());
+    const color = BUILDING_COLORS[Math.floor(rng() * BUILDING_COLORS.length)];
+    const building = createBuilding(pos.x, pos.z, 8, 6, 8, color, rng);
+    building.userData.label = change.label || 'New building';
+    building.userData.interactable = true;
+    scene.add(building);
+    interactables.push(building);
+
+    // Glowing sign
+    const signGeo = new THREE.PlaneGeometry(4, 1);
+    const signMat = new THREE.MeshStandardMaterial({ color: 0xffcc44, emissive: 0xffaa22, emissiveIntensity: 2 });
+    const sign = new THREE.Mesh(signGeo, signMat);
+    sign.position.set(pos.x, 5, pos.z + 4.02);
+    scene.add(sign);
+
+    notify(`${change.label || 'New building'} appeared nearby!`);
+}
+
+// =====================================================================
+// EXAMINE UI
+// =====================================================================
+let examineOpen = false;
+
+async function openExamine(obj) {
+    examineOpen = true;
+    document.exitPointerLock();
+    document.getElementById('examine-panel').style.display = 'block';
+    document.getElementById('examine-title').textContent = obj.userData.label || obj.userData.type;
+    document.getElementById('examine-desc').textContent = 'Claude is examining this...';
+    document.getElementById('examine-actions').innerHTML = '';
+
+    const result = await examineObject(obj);
+    document.getElementById('examine-desc').textContent = result.description;
+
+    const actionsDiv = document.getElementById('examine-actions');
+    for (const action of (result.interactions || [])) {
+        const btn = document.createElement('button');
+        btn.textContent = action;
+        btn.addEventListener('click', async () => {
+            btn.textContent = 'Doing...'; btn.disabled = true;
+            const outcome = await resolveAction(obj, action);
+            notify(outcome.result);
+            if (outcome.effect === 'disappear') obj.visible = false;
+            else if (outcome.effect === 'glow') obj.traverse(c => {
+                if (c.isMesh) { c.material = c.material.clone(); c.material.emissive = new THREE.Color(0xaa55ff); c.material.emissiveIntensity = 2; }
+            });
+            else if (outcome.effect === 'explode') { createExplosion(obj.position.clone()); obj.visible = false; }
+            if (outcome.item_found) notify(`Found: ${outcome.item_found}`);
+            closeExamine();
+        });
+        actionsDiv.appendChild(btn);
+    }
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Leave';
+    closeBtn.style.color = 'rgba(255,255,255,0.4)';
+    closeBtn.addEventListener('click', closeExamine);
+    actionsDiv.appendChild(closeBtn);
+}
+function closeExamine() {
+    examineOpen = false;
+    document.getElementById('examine-panel').style.display = 'none';
+    renderer.domElement.requestPointerLock();
+}
+
+// =====================================================================
+// EXPLOSION PARTICLES
+// =====================================================================
+const explosions = [];
+function createExplosion(pos) {
+    const count = 30, geo = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3), velocities = [];
+    for (let i = 0; i < count; i++) {
+        positions[i * 3] = pos.x; positions[i * 3 + 1] = pos.y + 0.5; positions[i * 3 + 2] = pos.z;
+        velocities.push(new THREE.Vector3((Math.random() - 0.5) * 8, Math.random() * 6 + 2, (Math.random() - 0.5) * 8));
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({ size: 0.15, color: 0xff8844, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    const p = new THREE.Points(geo, mat);
+    scene.add(p);
+    explosions.push({ particles: p, velocities, life: 1.5 });
+}
+function updateExplosions(dt) {
+    for (let i = explosions.length - 1; i >= 0; i--) {
+        const e = explosions[i];
+        e.life -= dt;
+        if (e.life <= 0) { scene.remove(e.particles); explosions.splice(i, 1); continue; }
+        const pos = e.particles.geometry.attributes.position.array;
+        for (let j = 0; j < e.velocities.length; j++) {
+            e.velocities[j].y += GRAVITY * dt * 0.3;
+            pos[j * 3] += e.velocities[j].x * dt;
+            pos[j * 3 + 1] += e.velocities[j].y * dt;
+            pos[j * 3 + 2] += e.velocities[j].z * dt;
+        }
+        e.particles.geometry.attributes.position.needsUpdate = true;
+        e.particles.material.opacity = e.life / 1.5;
+    }
+}
+
+// =====================================================================
+// UI
+// =====================================================================
+function notify(text) {
+    const c = document.getElementById('notifications');
+    const div = document.createElement('div');
+    div.className = 'notification';
+    div.textContent = text;
+    c.appendChild(div);
+    setTimeout(() => div.remove(), 4000);
+}
+function showGenerating(text) {
+    document.getElementById('generating-text').textContent = text;
+    document.getElementById('generating-overlay').style.display = 'block';
+}
+function updateGenerating(text) {
+    document.getElementById('generating-text').textContent = text;
+}
+function hideGenerating() {
+    document.getElementById('generating-overlay').style.display = 'none';
+}
+function closeAllPanels() {
+    if (chatOpen) closeChat();
+    if (examineOpen) closeExamine();
+}
+
+document.getElementById('chat-send').addEventListener('click', sendChat);
+document.getElementById('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+document.getElementById('chat-close').addEventListener('click', closeChat);
+
+// =====================================================================
+// AMBIENT PARTICLES
+// =====================================================================
+let ambientParticles;
+function createAmbientParticles() {
+    const count = 300, geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        pos[i * 3] = (Math.random() - 0.5) * 80;
+        pos[i * 3 + 1] = Math.random() * 20 + 2;
+        pos[i * 3 + 2] = (Math.random() - 0.5) * 80;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    ambientParticles = new THREE.Points(geo, new THREE.PointsMaterial({
+        size: 0.04, color: 0xaa88ff, transparent: true, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    scene.add(ambientParticles);
+}
+
+// =====================================================================
+// GAME LOOP
+// =====================================================================
+let gameStarted = false;
+const clock = new THREE.Clock();
+
+function update() {
+    const dt = Math.min(clock.getDelta(), 0.05);
+    if (!gameStarted) return;
+    updatePlayer(dt);
+    updateChunks(playerPos);
+    updateNPCs(dt);
+    updatePhysicsObjects(dt);
+    updateExplosions(dt);
+    if (ambientParticles) { ambientParticles.position.set(playerPos.x, 0, playerPos.z); ambientParticles.rotation.y += 0.0003; }
+    if (!chatOpen && !examineOpen) updateInteraction();
+    document.getElementById('info-bar').textContent =
+        `Pos: ${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)} | AI: ${aiCallsInFlight > 0 ? 'thinking...' : 'ready'} | Powered by Claude Code + Blender MCP`;
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    update();
+    renderer.render(scene, camera);
+}
+
+// =====================================================================
+// INIT
+// =====================================================================
+document.getElementById('start-btn').addEventListener('click', () => {
+    document.getElementById('start-screen').style.display = 'none';
+    renderer.domElement.requestPointerLock();
+    gameStarted = true;
+    clock.start();
+});
+renderer.domElement.addEventListener('click', () => {
+    if (gameStarted && !chatOpen && !examineOpen && !document.pointerLockElement) renderer.domElement.requestPointerLock();
+});
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+createAmbientParticles();
+updateChunks(playerPos);
+camera.position.set(0, PLAYER_HEIGHT, 0);
+animate();
+</script>
+</body>
+</html>
