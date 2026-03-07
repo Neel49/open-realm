@@ -11,13 +11,19 @@ let onClose = null;
 let onWorldEvent = null;
 
 export function isChatOpen() { return chatOpen; }
+export function getChatNPC() { return chatNPC; }
 
 export function initChat(closeCb, worldEventCb) {
     onClose = closeCb;
     onWorldEvent = worldEventCb;
 
     document.getElementById('chat-send').addEventListener('click', sendChat);
-    document.getElementById('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
+    const chatInput = document.getElementById('chat-input');
+    chatInput.addEventListener('keydown', e => {
+        e.stopPropagation();
+        if (e.key === 'Enter') sendChat();
+    });
+    chatInput.addEventListener('keyup', e => e.stopPropagation());
     document.getElementById('chat-close').addEventListener('click', closeChat);
 }
 

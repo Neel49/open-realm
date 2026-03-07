@@ -133,9 +133,9 @@ canvas { display: block; }
 
 /* ===== GENERATING OVERLAY ===== */
 #generating-overlay {
-    position: fixed; bottom: 120px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
     background: rgba(10,8,25,0.9); color: #22d3ee; padding: 14px 28px;
-    border-radius: 12px; font-size: 14px; display: none; z-index: 20;
+    border-radius: 12px; font-size: 14px; display: none; z-index: 100;
     border: 1px solid rgba(34,211,238,0.3); backdrop-filter: blur(12px);
     animation: pulse 1.5s ease-in-out infinite;
 }

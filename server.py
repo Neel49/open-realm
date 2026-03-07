@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Open Realm Backend — Gemini AI + Direct Blender socket (Rodin/PolyHaven/Hunyuan/code)"""
+# -*- coding: utf-8 -*-
+"""Open Realm Backend -- Gemini AI + Direct Blender socket (Rodin/PolyHaven/Hunyuan/code)"""
 
 import http.server
 import json
@@ -28,7 +29,7 @@ if env_file.exists():
             os.environ.setdefault(k, v)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-3.1-pro-preview"
 BLENDER_HOST = "localhost"
 BLENDER_PORT = 9876
 
@@ -62,14 +63,14 @@ def call_gemini(prompt, system=None, timeout=30, image_b64=None):
     body = {"contents": [{"parts": parts}]}
     if system:
         body["systemInstruction"] = {"parts": [{"text": system}]}
-    body["generationConfig"] = {"temperature": 0.9, "maxOutputTokens": 2048}
+    body["generationConfig"] = {"temperature": 0.9}
 
     data = json.dumps(body).encode("utf-8")
     req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
 
     try:
         with urlopen(req, timeout=timeout) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+            result = json.loads(resp.read().decode("utf-8"), strict=False)
             candidates = result.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
@@ -95,11 +96,22 @@ def extract_json(text):
 
 
 def clean_code(text):
-    """Strip markdown fences from code output."""
-    text = re.sub(r'^```python\s*', '', text.strip())
-    text = re.sub(r'^```\s*', '', text.strip())
-    text = re.sub(r'```\s*$', '', text.strip())
-    return text
+    """Extract Python code from response — handles markdown fences, mixed text, etc."""
+    text = text.strip()
+    # Try to extract code from markdown fences first
+    fence_match = re.search(r'```(?:python)?\s*\n(.*?)```', text, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+    # Strip any remaining fences
+    text = re.sub(r'^```python\s*', '', text)
+    text = re.sub(r'^```\s*', '', text)
+    text = re.sub(r'```\s*$', '', text)
+    # If response has explanation text before/after the code, try to find the code block
+    # Look for the first "import bpy" and take everything from there
+    import_match = re.search(r'(import bpy.*)', text, re.DOTALL)
+    if import_match:
+        return import_match.group(1).strip()
+    return text.strip()
 
 
 # =====================================================================
@@ -149,11 +161,38 @@ def blender_exec(code, timeout=180):
 def blender_screenshot():
     """Get a viewport screenshot from Blender as base64."""
     try:
-        result = blender_command("get_viewport_screenshot", timeout=10)
+        # First zoom to fit all objects so we can see them
+        blender_exec("""
+import bpy
+bpy.ops.object.select_all(action='SELECT')
+for area in bpy.context.screen.areas:
+    if area.type == 'VIEW_3D':
+        for region in area.regions:
+            if region.type == 'WINDOW':
+                override = bpy.context.copy()
+                override['area'] = area
+                override['region'] = region
+                with bpy.context.temp_override(**override):
+                    bpy.ops.view3d.view_selected()
+                break
+        break
+""", timeout=10)
+
+        import time
+        time.sleep(0.5)
+
+        filepath = "/tmp/blender_validation_screenshot.png"
+        result = blender_command("get_viewport_screenshot", {"filepath": filepath}, timeout=10)
+
+        # Check if the file was saved and read it as base64
+        if isinstance(result, dict) and result.get("success"):
+            if os.path.exists(filepath):
+                with open(filepath, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+
+        # Fallback: check if response has image data directly
         if isinstance(result, dict) and result.get("image"):
             return result["image"]
-        if isinstance(result, str):
-            return result
     except Exception as e:
         print(f"  Screenshot failed: {e}")
     return None
@@ -197,8 +236,14 @@ bpy.ops.export_scene.gltf(
 
 
 # =====================================================================
-# ASSET GENERATION — Multi-strategy with validation
+# ASSET GENERATION -- Multi-strategy with validation
 # =====================================================================
+def is_building(description):
+    """Check if the description is for a building/structure (needs interior)."""
+    building_words = r'shop|store|house|restaurant|cafe|bar|gym|church|school|bakery|library|museum|hospital|hotel|office|station|theater|cinema|mall|market|warehouse|garage|shed|hut|cottage|palace|castle|temple|mosque|pub|diner|pizzeria|salon|studio|clinic|pharmacy|bank|post.?office|flower|florist|mcdonald|burger|starbucks|dunkin|subway|kfc|taco|ice.?cream|pet.?store|bookstore|toy.?store|gallery|arena|stadium|prison|jail|tower|apartment|condo|mansion|villa|factory|workshop|forge|tavern|inn|lodge|cabin|tent|bunker|lab|observatory|greenhouse'
+    return bool(re.search(building_words, description.lower()))
+
+
 def generate_asset_bg(job_id, description, output_path):
     """Background thread: generate 3D asset using best available method."""
     jobs[job_id]["status"] = "generating"
@@ -207,31 +252,21 @@ def generate_asset_bg(job_id, description, output_path):
     if not blender_connected():
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["result"] = "Blender not connected"
-        print(f"  Asset {job_id}: FAILED — Blender not connected")
+        print(f"  Asset {job_id}: FAILED -- Blender not connected")
         return
 
     blender_clear()
 
-    # Strategy 1: Try Hyper3D Rodin (AI 3D generation — best quality)
-    if try_rodin(job_id, description, abs_output):
-        return
-
-    # Strategy 2: Try Hunyuan 3D (local API at localhost:8081)
-    if try_hunyuan(job_id, description, abs_output):
-        return
-
-    # Strategy 3: Try Poly Haven (free pre-made models)
-    if try_polyhaven(job_id, description, abs_output):
-        return
-
-    # Strategy 4: Gemini-generated Blender Python code with validation
+    # Always use Gemini code generation -- it has the feedback loop,
+    # creates clean geometry with proper materials, and works reliably
+    print(f"  Asset {job_id}: Using Gemini code pipeline (with feedback loop)")
     if try_gemini_code(job_id, description, abs_output):
         return
 
     # All strategies failed
     jobs[job_id]["status"] = "failed"
     jobs[job_id]["result"] = "All generation methods failed"
-    print(f"  Asset {job_id}: FAILED — all strategies exhausted")
+    print(f"  Asset {job_id}: FAILED -- all strategies exhausted")
 
 
 def try_rodin(job_id, description, output_path):
@@ -244,16 +279,17 @@ def try_rodin(job_id, description, output_path):
             print(f"  Asset {job_id}: Rodin not available: {status['error']}")
             return False
 
-        # Create job
+        # Create job -- enhance description to request interior
+        rodin_prompt = description[:150] + " with full interior, open door entrance, furniture and details inside"
         result = blender_command("create_rodin_job", {
-            "text_prompt": description[:200]
+            "text_prompt": rodin_prompt[:200]
         }, timeout=30)
 
         if isinstance(result, dict) and result.get("error"):
             print(f"  Asset {job_id}: Rodin job failed: {result['error']}")
             return False
 
-        # Get identifiers — handle nested response format
+        # Get identifiers -- handle nested response format
         # Main site: result has uuid and jobs.subscription_key
         # Fal AI: result has request_id
         jobs_data = result.get("jobs", {})
@@ -328,7 +364,7 @@ def try_hunyuan(job_id, description, output_path):
 
         blender_clear()
 
-        # Hunyuan local API is synchronous — returns GLB and imports directly
+        # Hunyuan local API is synchronous -- returns GLB and imports directly
         result = blender_command("create_hunyuan_job", {
             "text_prompt": description[:200]
         }, timeout=120)
@@ -408,105 +444,126 @@ def try_polyhaven(job_id, description, output_path):
         return False
 
 
-def try_gemini_code(job_id, description, output_path, max_attempts=3):
-    """Generate Blender Python code via Gemini, execute, validate with screenshot."""
+def try_gemini_code(job_id, description, output_path, max_attempts=4):
+    """Generate Blender Python code via Gemini, execute, validate with screenshot feedback loop."""
     print(f"  Asset {job_id}: Trying Gemini code generation...")
     blender_clear()
 
+    feedback_history = []  # accumulate feedback across attempts
+
     for attempt in range(max_attempts):
-        prompt = f"""Generate Blender Python code to create this 3D asset:
+        blender_clear()
 
-{description}
+        # Build the prompt with feedback from previous attempts
+        feedback_section = ""
+        if feedback_history:
+            feedback_section = "\n\n## FEEDBACK FROM PREVIOUS ATTEMPTS (FIX THESE ISSUES):\n"
+            for i, fb in enumerate(feedback_history):
+                feedback_section += f"Attempt {i+1}: {fb}\n"
+            feedback_section += "\nYou MUST address ALL the issues above. Do NOT repeat the same mistakes.\n"
 
-Requirements:
-- LOW-POLY stylized geometry (simple but recognizable)
-- Colorful Principled BSDF materials (make it visually interesting)
-- Center at origin, reasonable scale (a building ~5-10 units tall, objects ~1-3 units)
-- Keep vertex count under 5000
-- import bpy at top
-- NO export code, NO scene clearing
-- Output ONLY Python code, no explanation"""
+        prompt = f"""Generate Blender Python code to create this 3D asset for a game:
 
-        if attempt > 0:
-            blender_clear()
-            # Simpler prompt for retry — focus on getting SOMETHING created
-            prompt = f"""Create a simple low-poly 3D model in Blender for: {description}
+"{description}"
 
-Keep it VERY simple — just basic shapes (cubes, cylinders, planes) with colored materials.
-Example pattern:
-```
-import bpy
-bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 2))
-obj = bpy.context.active_object
-mat = bpy.data.materials.new(name="Mat1")
-mat.use_nodes = True
-mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.8, 0.2, 0.2, 1)
-obj.data.materials.append(mat)
-```
-Use ONLY bpy.ops.mesh.primitive_* calls. No complex geometry. Output ONLY Python code."""
+CRITICAL REQUIREMENTS:
+1. BRIGHT, COLORFUL materials -- this is a game, not a horror movie. Use vibrant, saturated colors.
+   - Every object MUST have a material with a visible Base Color (not black, not dark gray)
+   - Use emissive materials for signs and lights (set Emission color and strength > 2)
+2. RECOGNIZABLE -- if it's a flower shop, there must be flowers! If it's a bakery, there must be bread/cakes.
+   The model should be INSTANTLY recognizable as what it's supposed to be.
+3. SIGN -- every building MUST have a visible sign/awning above the entrance with a contrasting bright color.
+4. DETAILS that match the type:
+   - Flower shop: flower pots/bouquets out front, colorful awning, green/pink theme
+   - Bakery: display counter, bread shapes, warm yellow/brown theme
+   - Restaurant: tables/chairs, counter, menu board, themed colors
+   - Generic shop: display shelves, counter, appropriate decorations
+5. BUILDING STRUCTURE:
+   - 4 walls but with an OPENING on the front face (a doorway gap ~2 units wide, ~2.5 units tall)
+   - Player walks in through the opening -- NO door mesh blocking it
+   - Interior floor (plane at y=0.01)
+   - Interior has furniture/shelves/counter appropriate to the building type
+   - At least one point light INSIDE (warm color, energy=100-300) so interior is visible
+   - Building is about 6 units wide, 4 units deep, 3 units tall
+6. FRONT DECORATION: objects placed OUTSIDE the front of the building (flowers, display items, bench, etc.)
 
-        code = clean_code(call_gemini(prompt,
-            system="You are a Blender Python expert. Output only valid bpy code. No markdown, no explanation.",
-            timeout=30))
+Technical:
+- import bpy at the very top
+- Use bpy.ops.mesh.primitive_* for all geometry (cube_add, cylinder_add, uv_sphere_add, plane_add, cone_add)
+- Every mesh gets a Principled BSDF material with a BRIGHT Base Color (r,g,b,1) where values are 0-1
+- For signs/glowing elements: also set Emission input to a bright color and Emission Strength to 3-5
+- Add point lights with bpy.ops.object.light_add(type='POINT', location=(...)) and set energy=200
+- Keep vertex count reasonable, use simple primitive shapes
+- NO bpy.ops.export_scene, NO bpy.ops.wm.save, NO scene clearing
+- Output ONLY executable Python code, nothing else
+{feedback_section}"""
 
-        print(f"  Asset {job_id}: Attempt {attempt+1}, executing {len(code)} chars...")
+        raw_response = call_gemini(prompt,
+            system="You are a Blender Python expert creating game-ready 3D buildings. Output ONLY valid bpy Python code. No markdown fences, no comments outside code, no explanation text. The code must be immediately executable in Blender.",
+            timeout=180)
+
+        print(f"  Asset {job_id}: Raw response length: {len(raw_response)}, first 300 chars: {raw_response[:300]}")
+        code = clean_code(raw_response)
+        print(f"  Asset {job_id}: Attempt {attempt+1}/{max_attempts}, executing {len(code)} chars of cleaned code")
 
         try:
             blender_exec(code)
             # Verify objects were actually created
-            scene = blender_command("get_scene_info", timeout=5)
-            obj_count = scene.get("object_count", 0) if isinstance(scene, dict) else 0
+            scene_info = blender_command("get_scene_info", timeout=5)
+            obj_count = scene_info.get("object_count", 0) if isinstance(scene_info, dict) else 0
             if obj_count == 0:
+                feedback_history.append("Code executed but created ZERO objects. Make sure every bpy.ops call actually creates geometry.")
                 print(f"  Asset {job_id}: Code ran but created 0 objects, retrying...")
-                raise Exception("No objects created")
+                continue
             print(f"  Asset {job_id}: Created {obj_count} objects")
         except Exception as e:
+            error_msg = str(e)[:200]
+            feedback_history.append(f"Code crashed with error: {error_msg}. Fix the Python syntax/API calls.")
             print(f"  Asset {job_id}: Blender exec error: {e}")
-            if attempt == max_attempts - 1:
-                # Last attempt: simple fallback
-                try:
-                    blender_clear()
-                    blender_exec("""
-import bpy
-import random
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
-# Simple building fallback
-bpy.ops.mesh.primitive_cube_add(size=4, location=(0, 0, 2))
-obj = bpy.context.active_object
-obj.scale = (2, 2, 2)
-mat = bpy.data.materials.new(name="BuildingMat")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (random.random(), random.random(), random.random(), 1)
-obj.data.materials.append(mat)
-bpy.ops.mesh.primitive_plane_add(size=2, location=(0, 4.5, 2.1))
-sign = bpy.context.active_object
-sign_mat = bpy.data.materials.new(name="SignMat")
-sign_mat.use_nodes = True
-sign_mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.1, 0.6, 0.9, 1)
-sign.data.materials.append(sign_mat)
-""")
-                except Exception:
-                    pass
             continue
 
-        # Validate via screenshot
+        # Take screenshot and validate with Gemini vision
         screenshot = blender_screenshot()
-        if screenshot and attempt < max_attempts - 1:
+        if screenshot:
             validation = call_gemini(
-                f"I asked Blender to create: '{description}'. Does this viewport screenshot show "
-                f"something that reasonably matches? Reply with ONLY 'PASS' or 'FAIL: reason'.",
-                image_b64=screenshot, timeout=15
+                f"""I asked Blender to create: "{description}"
+
+Look at this screenshot of what was created. Evaluate it on these criteria:
+1. Does it look like what was requested? (e.g., if "flower shop", are there flowers and a shop?)
+2. Are the colors bright and appealing, or is it dark/muddy/black?
+3. Is there a visible sign or label?
+4. Does it have recognizable details that match the description?
+5. Is there a door opening to enter?
+
+If it looks good and recognizable, reply: PASS
+If it needs improvement, reply: FAIL: <specific list of what's wrong and what to fix>
+
+Be strict -- a dark featureless box is a FAIL. A bright colorful building with the right details is a PASS.""",
+                image_b64=screenshot, timeout=60
             )
-            print(f"  Asset {job_id}: Validation: {validation[:80]}")
-            if validation.strip().startswith("PASS"):
+            validation = validation.strip()
+            print(f"  Asset {job_id}: Validation: {validation[:120]}")
+
+            if validation.startswith("PASS"):
+                print(f"  Asset {job_id}: Passed validation on attempt {attempt+1}")
                 break
-            # Otherwise loop will retry
+            else:
+                # Extract the feedback and add to history for next attempt
+                fail_reason = validation.replace("FAIL:", "").replace("FAIL", "").strip()
+                if fail_reason:
+                    feedback_history.append(f"Screenshot review: {fail_reason}")
+                else:
+                    feedback_history.append("Screenshot review: Model doesn't match the description well enough.")
+
+                if attempt < max_attempts - 1:
+                    print(f"  Asset {job_id}: Failed validation, retrying with feedback...")
+                    continue
         else:
+            # No screenshot available, just accept what we have
+            print(f"  Asset {job_id}: No screenshot available, accepting result")
             break
 
-    # Export
+    # Export whatever we have
     try:
         blender_export_glb(output_path)
     except Exception as e:
@@ -514,13 +571,13 @@ sign.data.materials.append(sign_mat)
 
     if os.path.exists(output_path):
         file_size = os.path.getsize(output_path)
-        if file_size > 500:  # Sanity check — real GLB with geometry is > 500 bytes
+        if file_size > 500:
             jobs[job_id]["status"] = "done"
-            jobs[job_id]["result"] = f"Generated via Gemini code ({file_size} bytes)"
-            print(f"  Asset {job_id}: SUCCESS (Gemini code, {file_size}B)")
+            jobs[job_id]["result"] = f"Generated via Gemini code ({file_size} bytes, {len(feedback_history)} iterations)"
+            print(f"  Asset {job_id}: SUCCESS (Gemini code, {file_size}B, {attempt+1} attempts)")
             return True
 
-    print(f"  Asset {job_id}: Gemini code generation failed")
+    print(f"  Asset {job_id}: Gemini code generation failed after {max_attempts} attempts")
     return False
 
 
@@ -566,7 +623,7 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
         full_system = f"{SYSTEM_CONTEXT}\n\n## Current Task: NPC Chat\n\n{system}"
         print(f"  Chat: {prompt[:80]}...")
 
-        text = call_gemini(prompt, system=full_system, timeout=15)
+        text = call_gemini(prompt, system=full_system, timeout=60)
         data = extract_json(text)
         if data:
             return data
@@ -590,18 +647,24 @@ Respond ONLY with valid JSON:
     "world_changes": [
         {{
             "type": "spawn_building",
-            "description": "DETAILED description for 3D modeling: specific geometry, colors, components, layout. E.g. 'A red brick McDonald's restaurant with golden arches sign on front, drive-through window on right side, flat roof with ventilation units, glass front door and windows'",
+            "description": "EXTREMELY detailed description for 3D modeling. MUST include: exterior (walls, roof, door, windows, signs) AND full interior (rooms, furniture, counters, decorations, lighting). E.g. 'A McDonald's restaurant: exterior has red brick walls, golden arches sign, glass front door, drive-through window. Interior has a front counter with cash registers, menu boards on the wall behind, red plastic booth seating along windows, tiled floor, kitchen area in back with grills and fryers, bathroom doors on the side.'",
             "label": "display name"
         }}
     ],
     "effects": ["none"]
 }}
 
-Available types: spawn_building, spawn_object, spawn_npc, modify_area, teleport_player, weather_change
-For spawn_building/spawn_object, the "description" MUST be detailed enough for a 3D modeler — include colors, shapes, size, distinctive features.
-Keep world_changes to 1-2 items max."""
+Available types:
+- spawn_building: for buildings, shops, restaurants, houses, structures
+- spawn_object: for everything else -- animals, vehicles, furniture, food, items, people, creatures
+- spawn_npc: to add a new talkable character
+- modify_area, teleport_player, weather_change
 
-        text = call_gemini(prompt, system=system, timeout=20)
+For spawn_building/spawn_object, the "description" MUST be detailed enough for a 3D modeler -- include colors, shapes, size, distinctive features.
+Use spawn_object (not spawn_building) for things like dogs, cars, trees, food, furniture, etc.
+Keep world_changes to 1-3 items max."""
+
+        text = call_gemini(prompt, system=system, timeout=60)
         data = extract_json(text)
         if data:
             return data
@@ -617,7 +680,7 @@ Keep world_changes to 1-2 items max."""
         output_path = str(ASSETS_DIR / f"{job_id}.glb")
 
         jobs[job_id] = {"status": "queued", "path": f"assets/generated/{job_id}.glb"}
-        print(f"  Asset queued: {job_id} — {description[:60]}...")
+        print(f"  Asset queued: {job_id} -- {description[:60]}...")
 
         thread = threading.Thread(
             target=generate_asset_bg,
@@ -660,7 +723,7 @@ if __name__ == '__main__':
     blender_ok = blender_connected()
     server = ThreadedHTTPServer(('localhost', port), GameServer)
     print(f"╔═══════════════════════════════════════════════╗")
-    print(f"║   Open Realm — port {port}                       ║")
+    print(f"║   Open Realm -- port {port}                       ║")
     print(f"║   http://localhost:{port}                        ║")
     print(f"║   AI: Gemini {GEMINI_MODEL:>20}          ║")
     print(f"║   Blender: {'CONNECTED' if blender_ok else 'NOT FOUND':>10} (:{BLENDER_PORT})           ║")

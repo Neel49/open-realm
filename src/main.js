@@ -92,7 +92,7 @@ function update() {
     const dt = Math.min(clock.getDelta(), 0.05);
     if (!gameStarted) return;
 
-    updatePlayer(dt, camera, scene);
+    if (!isChatOpen() && !isExamineOpen()) updatePlayer(dt, camera, scene);
     updateChunks(playerPos, scene, npcs, sun, purpleGlow);
     updateNPCs(dt, playerPos);
     updatePhysicsObjects(dt);

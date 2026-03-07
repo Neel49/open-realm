@@ -26,5 +26,5 @@ export function hideGenerating() {
 
 export function updateInfoBar(playerPos, aiStatus) {
     document.getElementById('info-bar').textContent =
-        `Pos: ${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)} | AI: ${aiStatus} | Powered by Claude Code + Blender MCP`;
+        `Pos: ${playerPos.x.toFixed(0)}, ${playerPos.z.toFixed(0)} | AI: ${aiStatus} | Powered by Gemini + Blender MCP`;
 }

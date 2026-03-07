@@ -10,6 +10,7 @@ import { createProp, PROP_TYPES } from './props.js';
 import { createVehicle } from './vehicles.js';
 import { createTree, createStreetLight } from './environment.js';
 import { spawnNPC } from '../entities/npc.js';
+import { inVehicle } from '../entities/player.js';
 import { seeded } from '../utils.js';
 
 // Registries — shared with other systems
@@ -110,6 +111,11 @@ export function generateChunk(cx, cz, scene) {
 export function unloadChunk(key, scene, npcs) {
     const group = chunks.get(key);
     if (!group) return;
+
+    // If the player is driving a vehicle in this chunk, reparent it to the scene
+    if (inVehicle && inVehicle.parent === group) {
+        scene.attach(inVehicle);
+    }
 
     for (let i = npcs.length - 1; i >= 0; i--) {
         if (npcs[i].chunkKey === key) { scene.remove(npcs[i].mesh); npcs.splice(i, 1); }

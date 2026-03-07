@@ -22,7 +22,7 @@ export async function openExamine(obj, nearbyContext, scene) {
     const panel = document.getElementById('examine-panel');
     panel.style.display = 'block';
     document.getElementById('examine-title').textContent = obj.userData.label || obj.userData.type;
-    document.getElementById('examine-desc').textContent = 'Claude is examining this...';
+    document.getElementById('examine-desc').textContent = 'AI is examining this...';
     document.getElementById('examine-actions').innerHTML = '';
 
     const label = obj.userData.label || obj.userData.type;

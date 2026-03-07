@@ -7,6 +7,7 @@ import { makeMat } from '../world/materials.js';
 import { generateNPCProfile } from '../ai/claude-service.js';
 import { addLabel } from '../utils.js';
 import { interactables } from '../world/chunk-manager.js';
+import { getChatNPC } from '../ui/chat.js';
 
 export const npcs = [];
 
@@ -71,7 +72,16 @@ export async function spawnNPC(x, z, seed, chunkGroup, scene) {
 }
 
 export function updateNPCs(dt, playerPos) {
+    const talkingTo = getChatNPC();
     for (const npc of npcs) {
+        // Freeze NPC in conversation — face the player and stay still
+        if (talkingTo === npc) {
+            const dir = new THREE.Vector3().subVectors(playerPos, npc.mesh.position);
+            dir.y = 0;
+            if (dir.length() > 0.1) npc.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+            npc.mesh.position.y = 0;
+            continue;
+        }
         if (npc.following) {
             const dir = new THREE.Vector3().subVectors(playerPos, npc.mesh.position);
             dir.y = 0;

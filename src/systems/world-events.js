@@ -34,10 +34,48 @@ export async function processWorldEvent(npc, activity, playerMessage, scene) {
     }
 }
 
+function findClearSpawn(scene, basePos, radius = 12) {
+    // Try to find a spawn position that doesn't overlap existing buildings
+    const existing = [];
+    scene.traverse(child => {
+        if (child.userData.collidable || child.userData.type === 'generated') {
+            const wp = new THREE.Vector3();
+            child.getWorldPosition(wp);
+            existing.push(wp);
+        }
+    });
+    // Also check dynamicAssets
+    for (const asset of dynamicAssets) {
+        const wp = new THREE.Vector3();
+        asset.getWorldPosition(wp);
+        existing.push(wp);
+    }
+
+    // Try the base position first, then rotate around if blocked
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        const candidate = basePos.clone();
+        if (angle > 0) {
+            candidate.x += Math.cos(angle) * 8;
+            candidate.z += Math.sin(angle) * 8;
+        }
+        const tooClose = existing.some(e => {
+            const dx = candidate.x - e.x, dz = candidate.z - e.z;
+            return Math.sqrt(dx * dx + dz * dz) < radius;
+        });
+        if (!tooClose) return candidate;
+    }
+    // Fallback: push it further out
+    const away = basePos.clone();
+    away.x += (Math.random() - 0.5) * 30;
+    away.z += (Math.random() - 0.5) * 30;
+    return away;
+}
+
 async function processChange(change, npc, scene) {
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const spawnPos = playerPos.clone().add(forward.multiplyScalar(15));
-    spawnPos.y = 0;
+    const baseSpawn = playerPos.clone().add(forward.multiplyScalar(18));
+    baseSpawn.y = 0;
+    const spawnPos = findClearSpawn(scene, baseSpawn);
 
     if (change.type === 'spawn_building' || change.type === 'spawn_object') {
         const assetId = `gen_${Date.now()}`;
@@ -52,12 +90,87 @@ async function processChange(change, npc, scene) {
                     gltfLoader.load(assetPath, resolve, undefined, reject);
                 });
                 const model = gltf.scene;
+
+                // Auto-scale to realistic size based on bounding box
+                const box = new THREE.Box3().setFromObject(model);
+                const size = new THREE.Vector3();
+                box.getSize(size);
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                // Pick realistic target height based on what it is
+                const label = (change.label || change.description || '').toLowerCase();
+                let targetHeight;
+                if (change.type === 'spawn_building') {
+                    targetHeight = 10; // buildings
+                } else if (/dog|cat|pet|puppy|kitten|rabbit|chicken|duck|bird/.test(label)) {
+                    targetHeight = 0.6; // small animals
+                } else if (/horse|cow|deer|bear|lion|tiger|elephant/.test(label)) {
+                    targetHeight = 2.5; // large animals
+                } else if (/person|human|npc|guard|soldier|zombie/.test(label)) {
+                    targetHeight = 1.7; // people
+                } else if (/car|truck|van|bus|taxi/.test(label)) {
+                    targetHeight = 1.8; // vehicles
+                } else if (/tree|lamp|pole|tower|statue/.test(label)) {
+                    targetHeight = 5; // tall objects
+                } else if (/table|desk|counter|bench|chair|stool/.test(label)) {
+                    targetHeight = 1; // furniture
+                } else if (/food|cake|bread|pizza|cup|plate|bottle|book|phone/.test(label)) {
+                    targetHeight = 0.3; // small items
+                } else if (/shop|store|house|restaurant|cafe|bar|gym|church|school/.test(label)) {
+                    targetHeight = 10; // buildings by name
+                } else {
+                    targetHeight = change.type === 'spawn_building' ? 10 : 2;
+                }
+                if (maxDim > 0.01) {
+                    const scale = targetHeight / maxDim;
+                    model.scale.multiplyScalar(scale);
+                }
+
+                // Recalculate bounds after scaling and sit on ground
+                const scaledBox = new THREE.Box3().setFromObject(model);
+                const offset = -scaledBox.min.y; // push bottom to y=0
                 model.position.copy(spawnPos);
-                model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+                model.position.y = offset;
+
+                model.traverse(c => {
+                    if (c.isMesh) {
+                        c.castShadow = true;
+                        c.receiveShadow = true;
+                        // Fix dark materials — boost brightness for game rendering
+                        if (c.material) {
+                            const mat = c.material.clone();
+                            // If material has no color or is very dark, lighten it
+                            if (mat.color) {
+                                const hsl = {};
+                                mat.color.getHSL(hsl);
+                                if (hsl.l < 0.3) {
+                                    mat.color.setHSL(hsl.h, hsl.s, Math.max(0.4, hsl.l * 2));
+                                }
+                            }
+                            mat.roughness = Math.min(mat.roughness || 0.5, 0.8);
+                            c.material = mat;
+                        }
+                    }
+                });
                 model.userData = {
                     type: 'generated', label: change.label || 'Generated area',
-                    interactable: true, collidable: true, w: 8, d: 8,
+                    interactable: true, collidable: false,
                 };
+
+                // Add interior lights for buildings
+                if (change.type === 'spawn_building') {
+                    const scaledBox2 = new THREE.Box3().setFromObject(model);
+                    const center = new THREE.Vector3();
+                    scaledBox2.getCenter(center);
+                    // Warm interior light
+                    const interiorLight = new THREE.PointLight(0xffeedd, 3, targetHeight * 2);
+                    interiorLight.position.set(0, targetHeight * 0.6, 0);
+                    model.add(interiorLight);
+                    // Front entrance light
+                    const doorLight = new THREE.PointLight(0xffffcc, 2, targetHeight);
+                    doorLight.position.set(0, targetHeight * 0.4, targetHeight * 0.4);
+                    model.add(doorLight);
+                }
 
                 // Label sign
                 const canvas = document.createElement('canvas');
@@ -71,8 +184,9 @@ async function processChange(change, npc, scene) {
                 ctx.fillText(change.label || 'New Location', 256, 42);
                 const tex = new THREE.CanvasTexture(canvas);
                 const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true }));
-                sprite.position.y = 8;
-                sprite.scale.set(5, 0.7, 1);
+                const labelHeight = targetHeight + 2;
+                sprite.position.y = labelHeight;
+                sprite.scale.set(6, 0.8, 1);
                 model.add(sprite);
 
                 scene.add(model);
