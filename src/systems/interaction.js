@@ -63,14 +63,14 @@ export function handleGrabKey(player, scene, scribe) {
     }
 }
 
-export function handleVehicleKey(player, scribe) {
+export function handleVehicleKey(player, scene, scribe) {
     if (player.inVehicle) {
         scribe.log('vehicle', `Exited ${player.inVehicle.userData.label}`);
         player.exitVehicle();
         return;
     }
     if (lookedAtObject?.userData.drivable) {
-        player.enterVehicle(lookedAtObject);
+        player.enterVehicle(lookedAtObject, scene);
         scribe.log('vehicle', `Entered ${lookedAtObject.userData.label}`);
     }
 }

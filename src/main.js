@@ -7,7 +7,7 @@ import { PLAYER, COLORS } from './config.js';
 import { getAIStatus } from './ai/claude-service.js';
 import { updateChunks } from './world/chunk-manager.js';
 import { createAmbientParticles } from './world/environment.js';
-import { npcs, updateNPCs } from './entities/npc.js';
+import { npcs, updateNPCs, spawnStoryNPC } from './entities/npc.js';
 import { Player } from './entities/player.js';
 import { updatePhysicsObjects, updateExplosions } from './entities/physics.js';
 import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey } from './systems/interaction.js';
@@ -87,7 +87,7 @@ document.addEventListener('keydown', e => {
     }
     if (e.code === 'KeyE' && !isChatOpen() && !isExamineOpen()) handleInteractKey(scene);
     if (e.code === 'KeyG') handleGrabKey(player, scene, scribe);
-    if (e.code === 'KeyV') handleVehicleKey(player, scribe);
+    if (e.code === 'KeyV') handleVehicleKey(player, scene, scribe);
 });
 
 // =====================================================================
@@ -99,7 +99,7 @@ function update() {
 
     if (!isChatOpen() && !isExamineOpen()) player.update(dt, camera, scene);
     updateChunks(player.pos, scene, npcs, sun, purpleGlow);
-    updateNPCs(dt, player.pos);
+    updateNPCs(dt, player.pos, scene);
     updatePhysicsObjects(dt);
     updateExplosions(dt, scene);
 
@@ -142,6 +142,28 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Story NPCs
+spawnStoryNPC({
+    name: 'Rosa',
+    occupation: 'florist',
+    personality: 'A warm, curious florist who loves asking people about their favourite flowers. After chatting for a bit, she always invites them to come check out her flower shop.',
+    greeting: "Oh hi! I love meeting new people. So tell me — what are your favourite types of flowers?",
+    hair_color: [0.6, 0.2, 0.1],
+    shirt_color: [0.3, 0.7, 0.4],
+    pants_color: [0.25, 0.2, 0.15],
+}, 5, 8, scene);
+
+spawnStoryNPC({
+    name: 'Bruce Wayne',
+    occupation: 'billionaire philanthropist',
+    personality: 'The Dark Knight himself, disguised as a billionaire. Speaks in a gravelly, cryptic tone. Knows the city is crawling with criminals and is always ready to take action. Will offer the player a ride in the Batmobile if they seem brave enough.',
+    greeting: "Crime never sleeps in this city... neither do I. You look like someone who can handle themselves. How about we take the Batmobile for a spin?",
+    voice: 'Charon',
+    hair_color: [0.05, 0.05, 0.05],
+    shirt_color: [0.1, 0.1, 0.12],
+    pants_color: [0.08, 0.08, 0.1],
+}, -8, 5, scene);
 
 // Bootstrap
 updateChunks(player.pos, scene, npcs, sun, purpleGlow);

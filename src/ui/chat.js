@@ -4,11 +4,17 @@
 
 import { chatWithNPC } from '../ai/claude-service.js';
 import { notify } from './hud.js';
+import { API_BASE } from '../config.js';
 
 let chatOpen = false;
 let chatNPC = null;
 let onClose = null;
 let onWorldEvent = null;
+
+let recognition = null;
+let isRecording = false;
+let ttsAudio = null;
+const TTS_VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
 
 export function isChatOpen() { return chatOpen; }
 export function getChatNPC() { return chatNPC; }
@@ -25,6 +31,10 @@ export function initChat(closeCb, worldEventCb) {
     });
     chatInput.addEventListener('keyup', e => e.stopPropagation());
     document.getElementById('chat-close').addEventListener('click', closeChat);
+
+    initSpeechRecognition();
+    const micBtn = document.getElementById('chat-mic');
+    if (micBtn) micBtn.addEventListener('click', toggleMic);
 }
 
 export function openChat(npc) {
@@ -81,12 +91,82 @@ async function sendChat() {
     thinkingDiv.classList.remove('thinking');
     chatNPC.chatHistory.push({ role: 'NPC', text: response.dialogue });
     chatNPC.emotion = response.emotion || 'neutral';
+    speakNPC(response.dialogue);
 
     if (response.action && response.action !== 'none') {
         handleNPCAction(chatNPC, response.action, response.activity, text);
     }
 }
 
+function initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        document.getElementById('chat-mic').style.display = 'none';
+        return;
+    }
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (e) => {
+        const transcript = Array.from(e.results)
+            .map(r => r[0].transcript)
+            .join('');
+        document.getElementById('chat-input').value = transcript;
+    };
+
+    recognition.onend = () => {
+        isRecording = false;
+        document.getElementById('chat-mic').classList.remove('recording');
+        // Auto-send if we got text
+        const input = document.getElementById('chat-input');
+        if (input.value.trim()) sendChat();
+    };
+
+    recognition.onerror = (e) => {
+        isRecording = false;
+        document.getElementById('chat-mic').classList.remove('recording');
+        if (e.error !== 'no-speech') notify('Mic error: ' + e.error);
+    };
+}
+
+function npcVoice() {
+    if (!chatNPC) return TTS_VOICES[0];
+    if (chatNPC.profile.voice) return chatNPC.profile.voice;
+    let hash = 0;
+    for (const ch of chatNPC.profile.name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
+    return TTS_VOICES[Math.abs(hash) % TTS_VOICES.length];
+}
+
+async function speakNPC(text) {
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+    try {
+        const res = await fetch(`${API_BASE}/api/tts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice: npcVoice() }),
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        ttsAudio = new Audio(URL.createObjectURL(blob));
+        ttsAudio.play();
+    } catch (e) {
+        console.warn('[TTS]', e);
+    }
+}
+
+function toggleMic() {
+    if (!recognition) return;
+    if (isRecording) {
+        recognition.stop();
+    } else {
+        isRecording = true;
+        document.getElementById('chat-mic').classList.add('recording');
+        document.getElementById('chat-input').value = '';
+        recognition.start();
+    }
+}
 async function handleNPCAction(npc, action, activity, playerMessage) {
     if (action === 'follow') {
         npc.following = true;

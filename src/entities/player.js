@@ -39,7 +39,7 @@ export class Player {
     // ---- Update ----
 
     update(dt, camera, scene) {
-        if (this.inVehicle) { this._updateDriving(dt, camera); return; }
+        if (this.inVehicle) { this._updateDriving(dt, camera, scene); return; }
 
         const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
         const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -101,8 +101,15 @@ export class Player {
 
     // ---- Driving ----
 
-    _updateDriving(dt, camera) {
+    _updateDriving(dt, camera, scene) {
         const v = this.inVehicle, d = v.userData;
+
+        // Safety: ensure vehicle is always a direct child of the scene
+        if (v.parent !== scene) {
+            v.removeFromParent();
+            scene.add(v);
+        }
+
         if (this.keys['KeyW']) d.speed = Math.min(d.speed + 15 * dt, 25);
         else if (this.keys['KeyS']) d.speed = Math.max(d.speed - 20 * dt, -8);
         else d.speed *= 0.97;
@@ -112,6 +119,27 @@ export class Player {
         v.rotation.y += d.steer * dt * (Math.abs(d.speed) / 15);
         const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
         v.position.add(dir.multiplyScalar(d.speed * dt));
+
+        // Building collision for vehicle
+        const vw = (d.w || 2) / 2, vd = (d.d || 4) / 2;
+        const vehicleRadius = Math.max(vw, vd);
+        const wp = new THREE.Vector3();
+        let hit = false;
+        scene.traverse(child => {
+            if (!child.userData.collidable || child === v) return;
+            child.getWorldPosition(wp);
+            const hw = (child.userData.w || 2) / 2 + vehicleRadius;
+            const hd = (child.userData.d || 2) / 2 + vehicleRadius;
+            const dx = v.position.x - wp.x, dz = v.position.z - wp.z;
+            if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+                const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+                if (ox < oz) v.position.x += Math.sign(dx) * ox;
+                else v.position.z += Math.sign(dz) * oz;
+                hit = true;
+            }
+        });
+        if (hit) d.speed *= -0.3;
+
         this.pos.copy(v.position);
         this.pos.y = PLAYER.HEIGHT;
         const camOff = new THREE.Vector3(0, 4, -8).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
@@ -147,11 +175,15 @@ export class Player {
         this.dropHeldObject();
     }
 
-    enterVehicle(vehicle) {
+    enterVehicle(vehicle, scene) {
         this.inVehicle = vehicle;
         vehicle.userData.driving = true;
         vehicle.userData.speed = 0;
         vehicle.userData.steer = 0;
+        // Reparent to scene so the vehicle survives chunk unloads
+        vehicle.removeFromParent();
+        scene.add(vehicle);
+        vehicle.traverse(child => { child.frustumCulled = false; });
         document.getElementById('vehicle-hud').style.display = 'block';
         notify('Entered vehicle — WASD to drive');
     }

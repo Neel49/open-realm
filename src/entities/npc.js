@@ -71,7 +71,25 @@ export async function spawnNPC(x, z, seed, chunkGroup, scene) {
     interactables.push(mesh);
 }
 
-export function updateNPCs(dt, playerPos) {
+const NPC_RADIUS = 0.35;
+
+function resolveCollisions(pos, scene) {
+    const wp = new THREE.Vector3();
+    scene.traverse(child => {
+        if (!child.userData.collidable) return;
+        child.getWorldPosition(wp);
+        const hw = (child.userData.w || 2) / 2 + NPC_RADIUS;
+        const hd = (child.userData.d || 2) / 2 + NPC_RADIUS;
+        const dx = pos.x - wp.x, dz = pos.z - wp.z;
+        if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+            const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+            if (ox < oz) pos.x += Math.sign(dx) * ox;
+            else pos.z += Math.sign(dz) * oz;
+        }
+    });
+}
+
+export function updateNPCs(dt, playerPos, scene) {
     const talkingTo = getChatNPC();
     for (const npc of npcs) {
         // Freeze NPC in conversation — face the player and stay still
@@ -91,6 +109,7 @@ export function updateNPCs(dt, playerPos) {
                 npc.mesh.rotation.y = Math.atan2(dir.x, dir.z);
                 npc.mesh.position.y = Math.sin(Date.now() * 0.008) * 0.04;
             }
+            resolveCollisions(npc.mesh.position, scene);
             continue;
         }
 
@@ -111,7 +130,32 @@ export function updateNPCs(dt, playerPos) {
             npc.mesh.rotation.y = Math.atan2(dir.x, dir.z);
             npc.mesh.position.y = Math.sin(Date.now() * 0.008) * 0.04;
         }
+        resolveCollisions(npc.mesh.position, scene);
     }
+}
+
+export function spawnStoryNPC(profile, x, z, scene) {
+    const mesh = createHumanoid(profile);
+    mesh.position.set(x, 0, z);
+    mesh.userData = { type: 'npc', label: profile.name, interactable: true };
+
+    addLabel(mesh, profile.name, 2.0);
+
+    const npc = {
+        mesh, profile, seed: null,
+        chatHistory: [],
+        chunkKey: null,
+        originX: x, originZ: z,
+        walkTarget: new THREE.Vector3(x, 0, z),
+        walkTimer: 0,
+        emotion: 'neutral',
+        following: false,
+    };
+
+    scene.add(mesh);
+    npcs.push(npc);
+    interactables.push(mesh);
+    return npc;
 }
 
 export function findNPCByMesh(mesh) {
