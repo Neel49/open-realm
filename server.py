@@ -16,6 +16,10 @@ PROJECT_DIR = "/Users/neel.patel/Documents/extra/yc"  # Where .claude.json has b
 CLAUDE_BIN = "/Users/neel.patel/.local/bin/claude"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Load CLAUDE_CONTEXT.md for injection into all prompts
+CONTEXT_FILE = GAME_DIR / "CLAUDE_CONTEXT.md"
+CLAUDE_CONTEXT = CONTEXT_FILE.read_text() if CONTEXT_FILE.exists() else ""
+
 # Environment without CLAUDECODE to avoid nesting check
 CLEAN_ENV = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
@@ -53,20 +57,22 @@ def generate_asset_bg(job_id, description, output_path):
     """Background thread: ask claude to create a Blender asset and export it."""
     jobs[job_id]["status"] = "generating"
     abs_output = os.path.abspath(output_path)
-    prompt = f"""You have access to Blender MCP tools. Do the following:
+    prompt = f"""{CLAUDE_CONTEXT}
 
-1. First, get the current scene info to confirm Blender is connected.
-2. Clear the Blender scene (select all, delete all).
-3. Create this 3D asset using Blender Python code via execute_blender_code:
+## Current Task: 3D Asset Generation
 
-   {description}
+Create this asset: {description}
 
-4. Use simple LOW-POLY stylized geometry. Use colorful MeshStandardMaterial-like materials (Principled BSDF).
-5. Export the ENTIRE scene as a GLB file to exactly this ABSOLUTE path: {abs_output}
+Steps:
+1. Get scene info to confirm Blender is connected.
+2. Clear the scene (select all, delete all).
+3. Try Hyper3D Rodin first (generate_hyper3d_model_via_text with the description, poll with get_hyper3d_status, then import_generated_asset).
+4. If Rodin fails or is unavailable, create the asset manually with execute_blender_code using LOW-POLY stylized geometry and colorful Principled BSDF materials.
+5. Export the ENTIRE scene as GLB to exactly: {abs_output}
 
-Use bpy.ops.export_scene.gltf(filepath="{abs_output}", export_format='GLB', use_selection=False, export_apply=True, export_materials='EXPORT')
+Use: bpy.ops.export_scene.gltf(filepath="{abs_output}", export_format='GLB', use_selection=False, export_apply=True, export_materials='EXPORT')
 
-Be thorough — actually create the geometry and export it. Do NOT just describe what to do."""
+Actually create and export the geometry. Do NOT just describe what to do."""
 
     text = run_claude(prompt, timeout=180)
     success = os.path.exists(abs_output)
@@ -113,7 +119,7 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
         """NPC conversation — claude generates dialogue + optional actions."""
         prompt = body.get('prompt', '')
         system = body.get('system', '')
-        full = f"{system}\n\n{prompt}" if system else prompt
+        full = f"{CLAUDE_CONTEXT}\n\n## Current Task: NPC Chat\n\n{system}\n\n{prompt}"
         print(f"  Chat request: {prompt[:80]}...")
 
         text = run_claude(full, timeout=45)
@@ -130,8 +136,9 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
         action = body.get('action', '')
         print(f"  World event: {action[:80]}...")
 
-        prompt = f"""You are the game master of "Open Realm", an AI-powered open world game.
-The game is a 3D city with NPCs, buildings, vehicles, and props. Everything is interactive.
+        prompt = f"""{CLAUDE_CONTEXT}
+
+## Current Task: World Event
 
 CURRENT CONTEXT: {context}
 PLAYER ACTION: {action}
