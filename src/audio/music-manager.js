@@ -64,7 +64,7 @@ export class MusicManager {
         this.generating = true;
         try {
             const eventLog = this.scribe.getSummary();
-            console.log(`[Music] Requesting prompt for env=${environment}`);
+            console.log(`[Music] Requesting prompt for env=${environment}, events:\n${eventLog}`);
             const prompt = await generateMusicPrompt(environment, eventLog);
             console.log(`[Music] Prompt: ${prompt}`);
             const result = await requestMusic(environment, prompt);

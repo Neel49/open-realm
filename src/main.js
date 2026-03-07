@@ -93,6 +93,7 @@ document.addEventListener('keydown', e => {
 // =====================================================================
 // GAME LOOP
 // =====================================================================
+let drivingLogTimer = 0;
 function update() {
     const dt = Math.min(clock.getDelta(), 0.05);
     if (!gameStarted) return;
@@ -102,6 +103,18 @@ function update() {
     updateNPCs(dt, player.pos);
     updatePhysicsObjects(dt);
     updateExplosions(dt, scene);
+
+    // Log driving activity periodically
+    if (player.inVehicle) {
+        drivingLogTimer += dt;
+        if (drivingLogTimer >= 5) {
+            const speed = Math.abs(player.inVehicle.userData.speed || 0).toFixed(0);
+            scribe.log('driving', `Driving ${player.inVehicle.userData.label} at speed ${speed}`);
+            drivingLogTimer = 0;
+        }
+    } else {
+        drivingLogTimer = 0;
+    }
 
     // Particles follow player
     ambientParticles.position.set(player.pos.x, 0, player.pos.z);

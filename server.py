@@ -24,9 +24,9 @@ except ImportError:
 
 GAME_DIR = Path(__file__).parent
 ASSETS_DIR = GAME_DIR / "assets" / "generated"
-MUSIC_DIR = GAME_DIR / "assets" / "music"
+PROJECT_DIR = str(GAME_DIR)  # Where .mcp.json has blender MCP
+CLAUDE_BIN = "/Users/darshpatel/.local/bin/claude"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
-MUSIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # Load .env
 env_file = GAME_DIR / ".env"
@@ -38,6 +38,7 @@ if env_file.exists():
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-3.1-pro-preview"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 BLENDER_HOST = "localhost"
 BLENDER_PORT = 9876
 LYRIA_MODEL = "models/lyria-realtime-exp"
@@ -594,8 +595,8 @@ Be strict -- a dark featureless box is a FAIL. A bright colorful building with t
 # =====================================================================
 # MUSIC GENERATION (Lyria)
 # =====================================================================
-async def _stream_lyria(prompt, output_path):
-    """Connect to Lyria realtime, stream audio for LYRIA_DURATION seconds, save as WAV."""
+async def _stream_lyria(prompt):
+    """Connect to Lyria realtime, stream audio for LYRIA_DURATION seconds, return WAV bytes."""
     if not genai:
         raise ImportError("google-genai package not installed")
     client = genai.Client(api_key=GEMINI_API_KEY, http_options={'api_version': 'v1alpha'})
@@ -618,25 +619,29 @@ async def _stream_lyria(prompt, output_path):
                 break
 
     pcm_data = b"".join(pcm_chunks)[:bytes_needed]
-    with wave.open(output_path, "wb") as wf:
+    import io
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
         wf.setnchannels(channels)
         wf.setsampwidth(2)
         wf.setframerate(sample_rate)
         wf.writeframes(pcm_data)
+    return buf.getvalue()
 
 
-def generate_music_bg(job_id, prompt, output_path):
-    """Background thread: stream from Lyria realtime and save as WAV."""
+def generate_music_bg(job_id, prompt):
+    """Background thread: stream from Lyria realtime and store WAV in memory."""
     jobs[job_id]["status"] = "generating"
     try:
-        asyncio.run(_stream_lyria(prompt, output_path))
+        wav_bytes = asyncio.run(_stream_lyria(prompt))
     except Exception as e:
         print(f"  Music job {job_id}: FAILED -- {e}")
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["error"] = str(e)
         return
     jobs[job_id]["status"] = "done"
-    print(f"  Music job {job_id}: SUCCESS ({output_path})")
+    jobs[job_id]["audio"] = wav_bytes
+    print(f"  Music job {job_id}: SUCCESS ({len(wav_bytes)} bytes in memory)")
 
 
 # =====================================================================
@@ -657,6 +662,9 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(content_length)) if content_length else {}
+
+        if self.path == '/api/tts':
+            return self.handle_tts(body)
 
         handlers = {
             '/api/chat': self.handle_chat,
@@ -767,6 +775,10 @@ Keep world_changes to 1-3 items max."""
             "Based on the player's current environment and recent events, "
             "write a short music generation prompt (1-2 sentences, max 50 words) "
             "for an AI music generator. The music should be instrumental only. "
+            "Include ambient sound cues that match the events — for example, if the player "
+            "is driving, incorporate engine rumble, road noise, and a faster tempo. "
+            "If there's combat, add tension and intensity. If exploring at night, lean into "
+            "atmospheric and mysterious tones. Let the events shape the sound design. "
             "Respond with ONLY the music prompt text, nothing else.\n\n"
             f"Current environment: {environment}\n"
             f"Recent events:\n{event_log or 'Player is exploring quietly.'}"
@@ -779,10 +791,15 @@ Keep world_changes to 1-3 items max."""
         environment = body.get('environment', 'city')
         prompt = body.get('prompt', 'ambient background music')
         job_id = f"music_{environment}_{str(uuid.uuid4())[:6]}"
-        output_path = str(MUSIC_DIR / f"{job_id}.wav")
-        jobs[job_id] = {"status": "queued", "path": f"assets/music/{job_id}.wav"}
-        print(f"  Music generation started: {job_id}")
-        thread = threading.Thread(target=generate_music_bg, args=(job_id, prompt, output_path), daemon=True)
+
+        jobs[job_id] = {"status": "queued"}
+        print(f"  Music generation started: {job_id} — {prompt[:60]}...")
+
+        thread = threading.Thread(
+            target=generate_music_bg,
+            args=(job_id, prompt),
+            daemon=True
+        )
         thread.start()
         return {"job_id": job_id, "status": "queued"}
 
@@ -790,7 +807,84 @@ Keep world_changes to 1-3 items max."""
         """Check status of a music generation job."""
         job_id = body.get('job_id', '')
         job = jobs.get(job_id, {"status": "unknown"})
-        return {"job_id": job_id, **job}
+        result = {"job_id": job_id, "status": job.get("status", "unknown")}
+        if job.get("status") == "done":
+            result["path"] = f"/api/music-audio?job_id={job_id}"
+        if job.get("error"):
+            result["error"] = job["error"]
+        return result
+
+    def handle_tts(self, body):
+        """Generate speech from text using Gemini TTS and return WAV audio."""
+        text = body.get('text', '')
+        voice = body.get('voice', 'Kore')
+        if not text:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "No text provided"}).encode())
+            return
+        print(f"  TTS request: voice={voice}, text={text[:60]}...")
+        try:
+            from google.genai import types
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=text,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice,
+                            )
+                        )
+                    ),
+                ),
+            )
+            audio_data = response.candidates[0].content.parts[0].inline_data.data
+            # Wrap raw PCM in WAV (24kHz mono 16-bit per Gemini TTS spec)
+            import io
+            buf = io.BytesIO()
+            with wave.open(buf, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(audio_data)
+            wav_bytes = buf.getvalue()
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/wav')
+            self.send_header('Content-Length', str(len(wav_bytes)))
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(wav_bytes)
+            print(f"  TTS done: {len(wav_bytes)} bytes")
+        except Exception as e:
+            print(f"  TTS failed: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
+
+    def do_GET(self):
+        """Serve music audio from memory, fall through to static files."""
+        if self.path.startswith('/api/music-audio'):
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(self.path).query)
+            job_id = qs.get('job_id', [''])[0]
+            job = jobs.get(job_id)
+            if job and job.get("audio"):
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/wav')
+                self.send_header('Content-Length', str(len(job["audio"])))
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(job["audio"])
+                return
+            self.send_error(404, "Audio not found")
+            return
+        super().do_GET()
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
