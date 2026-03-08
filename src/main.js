@@ -187,4 +187,22 @@ spawnStoryNPC({
 updateChunks(player.pos, scene, npcs, sun, purpleGlow);
 camera.position.set(0, PLAYER.HEIGHT, 0);
 music.init(player.pos);
+
+// Track texture loading progress
+const loadStatus = document.getElementById('load-status');
+const loadBarFill = document.getElementById('load-bar-fill');
+const loadText = loadStatus.querySelector('.load-text');
+const startBtn = document.getElementById('start-btn');
+THREE.DefaultLoadingManager.onLoad = () => {
+    loadBarFill.style.width = '100%';
+    loadText.textContent = 'Ready';
+    loadStatus.classList.add('done');
+    startBtn.disabled = false;
+};
+THREE.DefaultLoadingManager.onProgress = (_url, loaded, total) => {
+    const pct = Math.round((loaded / total) * 100);
+    loadBarFill.style.width = pct + '%';
+    loadText.textContent = `Loading assets ${loaded}/${total}`;
+};
+
 animate();

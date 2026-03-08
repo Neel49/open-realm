@@ -12,7 +12,11 @@
     <h1>Open Realm</h1>
     <p class="sub">AI-Powered Open World &mdash; Every interaction is real</p>
     <p class="powered">Powered by Gemini + Blender MCP</p>
-    <button id="start-btn">ENTER WORLD</button>
+    <button id="start-btn" disabled>ENTER WORLD</button>
+    <div id="load-status">
+        <div id="load-bar-track"><div id="load-bar-fill"></div></div>
+        <span class="load-text">Loading world...</span>
+    </div>
     <div class="controls-info">
         WASD &mdash; Move &nbsp;|&nbsp; Mouse &mdash; Look &nbsp;|&nbsp; SPACE &mdash; Jump &nbsp;|&nbsp; SHIFT &mdash; Run<br>
         E &mdash; Interact / Talk &nbsp;|&nbsp; G &mdash; Grab &nbsp;|&nbsp; Click &mdash; Throw &nbsp;|&nbsp; V &mdash; Enter Vehicle &nbsp;|&nbsp; ESC &mdash; Close

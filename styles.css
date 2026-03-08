@@ -129,7 +129,24 @@ canvas { display: block; }
     font-weight: 600; letter-spacing: 1px; transition: transform 0.2s, box-shadow 0.2s;
     box-shadow: 0 4px 24px rgba(168,85,247,0.4);
 }
-#start-btn:hover { transform: scale(1.05); box-shadow: 0 6px 30px rgba(168,85,247,0.6); }
+#start-btn:hover:not(:disabled) { transform: scale(1.05); box-shadow: 0 6px 30px rgba(168,85,247,0.6); }
+#start-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#load-status {
+    margin-top: 24px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+#load-status .load-text {
+    color: rgba(255,255,255,0.45); font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+}
+#load-bar-track {
+    width: 220px; height: 3px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden;
+}
+#load-bar-fill {
+    height: 100%; width: 0%; border-radius: 3px;
+    background: linear-gradient(90deg, #a855f7, #22d3ee);
+    transition: width 0.3s ease;
+}
+#load-status.done .load-text { color: rgba(34,211,238,0.9); }
+#load-status.done #load-bar-fill { width: 100%; }
 .controls-info { color: rgba(255,255,255,0.3); font-size: 12px; margin-top: 30px; line-height: 2; text-align: center; }
 
 /* ===== VEHICLE HUD ===== */
