@@ -144,7 +144,6 @@ function animate() {
 document.getElementById('start-btn').addEventListener('click', () => {
     document.getElementById('start-screen').style.display = 'none';
     renderer.domElement.requestPointerLock();
-    music.init(player.pos);
     music.resume();
     gameStarted = true;
     clock.start();
@@ -184,7 +183,8 @@ spawnStoryNPC({
     pants_color: [0.08, 0.08, 0.1],
 }, -8, 5, scene);
 
-// Bootstrap
+// Bootstrap — preload chunks, textures, and music before user clicks Enter
 updateChunks(player.pos, scene, npcs, sun, purpleGlow);
 camera.position.set(0, PLAYER.HEIGHT, 0);
+music.init(player.pos);
 animate();
