@@ -8,6 +8,7 @@ import { getAIStatus } from './ai/claude-service.js';
 import { updateChunks } from './world/chunk-manager.js';
 import { createAmbientParticles } from './world/environment.js';
 import { npcs, updateNPCs, spawnStoryNPC } from './entities/npc.js';
+import { createBank } from './world/building.js';
 import { Player } from './entities/player.js';
 import { updatePhysicsObjects, updateExplosions } from './entities/physics.js';
 import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey } from './systems/interaction.js';
@@ -65,6 +66,8 @@ scene.add(ambientParticles);
 let gameStarted = false;
 const clock = new THREE.Clock();
 const player = new Player();
+let batmobileDriveTime = 0;
+let bankSpawned = false;
 const scribe = new Scribe();
 const music = new MusicManager(scribe);
 
@@ -108,6 +111,19 @@ function update() {
     ambientParticles.rotation.y += 0.0003;
 
     music.update(dt, player.pos);
+
+    // Spawn the bank after 10 seconds in the Batmobile
+    if (player.inVehicle && player.inVehicle.userData.label === 'Batmobile') {
+        batmobileDriveTime += dt;
+        if (!bankSpawned && batmobileDriveTime >= 10) {
+            bankSpawned = true;
+            const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.inVehicle.rotation.y);
+            const bankX = player.pos.x + dir.x * 30;
+            const bankZ = player.pos.z + dir.z * 30;
+            const bank = createBank(bankX, bankZ);
+            scene.add(bank);
+        }
+    }
 
     if (!isChatOpen() && !isExamineOpen()) updateInteraction(camera, scene, player);
     updateInfoBar(player.pos, getAIStatus());
