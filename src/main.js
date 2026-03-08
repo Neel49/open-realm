@@ -7,13 +7,13 @@ import { PLAYER, COLORS } from './config.js';
 import { getAIStatus } from './ai/claude-service.js';
 import { updateChunks } from './world/chunk-manager.js';
 import { createAmbientParticles } from './world/environment.js';
-import { npcs, updateNPCs, spawnStoryNPC } from './entities/npc.js';
+import { npcs, updateNPCs, spawnStoryNPC, findNPCByMesh } from './entities/npc.js';
 import { createBank } from './world/building.js';
 import { Player } from './entities/player.js';
 import { updatePhysicsObjects, updateExplosions } from './entities/physics.js';
-import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey } from './systems/interaction.js';
+import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey, getLookedAtObject } from './systems/interaction.js';
 import { processWorldEvent } from './systems/world-events.js';
-import { initChat, isChatOpen, closeChat } from './ui/chat.js';
+import { initChat, isChatOpen, closeChat, startVoiceChat, endVoiceChat, isVoiceChatActive } from './ui/chat.js';
 import { initExamine, isExamineOpen, closeExamine } from './ui/examine.js';
 import { updateInfoBar, notify } from './ui/hud.js';
 import { MusicManager } from './audio/music-manager.js';
@@ -91,6 +91,16 @@ document.addEventListener('keydown', e => {
     if (e.code === 'KeyE' && !isChatOpen() && !isExamineOpen()) handleInteractKey(scene);
     if (e.code === 'KeyG') handleGrabKey(player, scene, scribe);
     if (e.code === 'KeyV') handleVehicleKey(player, scene, scribe);
+    if (e.code === 'KeyT' && !e.repeat && !isChatOpen() && !isExamineOpen()) {
+        const obj = getLookedAtObject();
+        if (obj && obj.userData.type === 'npc') {
+            const npc = findNPCByMesh(obj);
+            if (npc) startVoiceChat(npc);
+        }
+    }
+});
+document.addEventListener('keyup', e => {
+    if (e.code === 'KeyT' && isVoiceChatActive()) endVoiceChat();
 });
 
 // =====================================================================
@@ -119,9 +129,11 @@ function update() {
             bankSpawned = true;
             notify('AI is generating Gotham National Bank...');
             setTimeout(() => {
-                const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.inVehicle ? player.inVehicle.rotation.y : 0);
-                const bankX = player.pos.x + dir.x * 30;
-                const bankZ = player.pos.z + dir.z * 30;
+                const rot = player.inVehicle ? player.inVehicle.rotation.y : 0;
+                const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+                const left = new THREE.Vector3(-1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+                const bankX = player.pos.x + dir.x * 35 + left.x * 25;
+                const bankZ = player.pos.z + dir.z * 35 + left.z * 25;
                 const bank = createBank(bankX, bankZ);
                 scene.add(bank);
             }, 2000);
@@ -170,7 +182,7 @@ spawnStoryNPC({
     hair_color: [0.6, 0.2, 0.1],
     shirt_color: [0.3, 0.7, 0.4],
     pants_color: [0.25, 0.2, 0.15],
-}, 5, 8, scene);
+}, 45, 48, scene);
 
 spawnStoryNPC({
     name: 'Bruce Wayne',
@@ -181,11 +193,11 @@ spawnStoryNPC({
     hair_color: [0.05, 0.05, 0.05],
     shirt_color: [0.1, 0.1, 0.12],
     pants_color: [0.08, 0.08, 0.1],
-}, -8, 5, scene);
+}, 32, 45, scene);
 
 // Bootstrap — preload chunks, textures, and music before user clicks Enter
 updateChunks(player.pos, scene, npcs, sun, purpleGlow);
-camera.position.set(0, PLAYER.HEIGHT, 0);
+camera.position.set(40, PLAYER.HEIGHT, 40);
 music.init(player.pos);
 
 // Track texture loading progress
@@ -204,5 +216,4 @@ THREE.DefaultLoadingManager.onProgress = (_url, loaded, total) => {
     loadBarFill.style.width = pct + '%';
     loadText.textContent = `Loading assets ${loaded}/${total}`;
 };
-
 animate();

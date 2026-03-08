@@ -13,6 +13,8 @@ const raycaster = new THREE.Raycaster();
 raycaster.far = 8;
 let lookedAtObject = null;
 
+export function getLookedAtObject() { return lookedAtObject; }
+
 export function updateInteraction(camera, scene, player) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const targets = [...interactables];
@@ -31,7 +33,7 @@ export function updateInteraction(camera, scene, player) {
             if (!player.heldObject) crosshair.className = 'active';
             const type = obj.userData.type;
             let text = '';
-            if (type === 'npc') text = `<kbd>E</kbd> Talk to ${obj.userData.label}`;
+            if (type === 'npc') text = `<kbd>E</kbd> Talk &nbsp; <kbd>T</kbd> Voice &nbsp; ${obj.userData.label}`;
             else if (type === 'vehicle') text = `<kbd>V</kbd> Enter ${obj.userData.label}`;
             else if (obj.userData.grabbable) text = `<kbd>E</kbd> Examine &nbsp; <kbd>G</kbd> Grab`;
             else text = `<kbd>E</kbd> Examine ${obj.userData.label}`;

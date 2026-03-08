@@ -108,11 +108,11 @@ export function generateChunk(cx, cz, scene) {
     const oz = cz * WORLD.CHUNK_SIZE;
 
     // Ground
-    const isSpawnArea = cx === 0 && cz === 0;
-    const isNearSpawn = Math.abs(cx) <= 1 && Math.abs(cz) <= 1;
-    const isRoadX = !isNearSpawn && Math.abs(cx) % 3 === 0;
-    const isRoadZ = !isNearSpawn && Math.abs(cz) % 3 === 0;
-    const isPark = isSpawnArea || (!isRoadX && !isRoadZ && rng() < 0.15);
+    const isSpawnArea = cx === 1 && cz === 1;
+    const isNearSpawn = (cx === 1 && Math.abs(cz - 1) === 1) || (cz === 1 && Math.abs(cx - 1) === 1);
+    const isRoadX = !isSpawnArea && !isNearSpawn && Math.abs(cx) % 3 === 0;
+    const isRoadZ = !isSpawnArea && !isNearSpawn && Math.abs(cz) % 3 === 0;
+    const isPark = isSpawnArea || (!isRoadX && !isRoadZ && rng() < 0.03);
     const groundMat = (isRoadX || isRoadZ) ? ROAD_MAT : isPark ? GRASS_MAT : SIDEWALK_MAT;
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.CHUNK_SIZE, WORLD.CHUNK_SIZE), groundMat);
@@ -140,9 +140,12 @@ export function generateChunk(cx, cz, scene) {
 
     // Buildings (skip if a landmark is in this chunk)
     if (!isRoadX && !isRoadZ && !isPark && !hasLandmark) {
-        const n = Math.floor(rng() * 3) + 1;
+        const n = Math.floor(rng() * 4) + 3;
         for (let i = 0; i < n; i++) {
-            const bw = 4 + rng() * 8, bd = 4 + rng() * 8, bh = 5 + rng() * 25;
+            const bw = 4 + rng() * 8, bd = 4 + rng() * 8;
+            const minDim = Math.min(bw, bd);
+            const maxH = minDim * 18;
+            const bh = rng() < 0.45 ? Math.min(90 + rng() * 135, maxH) : 22 + rng() * 53;
             const bx = ox + (rng() - 0.5) * (WORLD.CHUNK_SIZE - bw - 4);
             const bz = oz + (rng() - 0.5) * (WORLD.CHUNK_SIZE - bd - 4);
             const color = COLORS.BUILDING[Math.floor(rng() * COLORS.BUILDING.length)];

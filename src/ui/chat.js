@@ -13,11 +13,15 @@ let onWorldEvent = null;
 
 let recognition = null;
 let isRecording = false;
+let usedMic = false;
 let ttsAudio = null;
-const TTS_VOICES = ['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck'];
+let voiceChatMode = false;
+let voiceChatNPC = null;
+let voiceTranscript = '';
+const TTS_VOICES = ['Charon', 'Fenrir', 'Puck'];
 
 export function isChatOpen() { return chatOpen; }
-export function getChatNPC() { return chatNPC; }
+export function getChatNPC() { return chatNPC || voiceChatNPC; }
 
 export function initChat(closeCb, worldEventCb) {
     onClose = closeCb;
@@ -91,10 +95,11 @@ async function sendChat() {
     thinkingDiv.classList.remove('thinking');
     chatNPC.chatHistory.push({ role: 'NPC', text: response.dialogue });
     chatNPC.emotion = response.emotion || 'neutral';
-    speakNPC(response.dialogue);
+    if (usedMic) speakNPC(response.dialogue);
+    usedMic = false;
 
     if (response.action && response.action !== 'none') {
-        handleNPCAction(chatNPC, response.action, response.activity, text);
+        handleNPCAction(chatNPC, response.action, response.activity, text, false);
     }
 }
 
@@ -113,21 +118,37 @@ function initSpeechRecognition() {
         const transcript = Array.from(e.results)
             .map(r => r[0].transcript)
             .join('');
-        document.getElementById('chat-input').value = transcript;
+        if (voiceChatMode) {
+            voiceTranscript = transcript;
+        } else {
+            document.getElementById('chat-input').value = transcript;
+        }
     };
 
     recognition.onend = () => {
         isRecording = false;
-        document.getElementById('chat-mic').classList.remove('recording');
-        // Auto-send if we got text
-        const input = document.getElementById('chat-input');
-        if (input.value.trim()) sendChat();
+        if (voiceChatMode) {
+            finishVoiceChat();
+        } else {
+            document.getElementById('chat-mic').classList.remove('recording');
+            const input = document.getElementById('chat-input');
+            if (input.value.trim()) {
+                usedMic = true;
+                sendChat();
+            }
+        }
     };
 
     recognition.onerror = (e) => {
         isRecording = false;
-        document.getElementById('chat-mic').classList.remove('recording');
-        if (e.error !== 'no-speech') notify('Mic error: ' + e.error);
+        if (voiceChatMode) {
+            voiceChatMode = false;
+            voiceChatNPC = null;
+            notify('Voice failed — try again');
+        } else {
+            document.getElementById('chat-mic').classList.remove('recording');
+            if (e.error !== 'no-speech') notify('Mic error: ' + e.error);
+        }
     };
 }
 
@@ -167,21 +188,63 @@ function toggleMic() {
         recognition.start();
     }
 }
-async function handleNPCAction(npc, action, activity, playerMessage) {
+export function startVoiceChat(npc) {
+    if (!recognition || isRecording) return;
+    voiceChatMode = true;
+    voiceChatNPC = npc;
+    voiceTranscript = '';
+    isRecording = true;
+    notify(`Listening... (release T to send)`);
+    recognition.start();
+}
+
+export function endVoiceChat() {
+    if (!voiceChatMode || !isRecording) return;
+    recognition.stop();
+}
+
+export function isVoiceChatActive() { return voiceChatMode && isRecording; }
+
+async function finishVoiceChat() {
+    const npc = voiceChatNPC;
+    const text = voiceTranscript.trim();
+    voiceChatMode = false;
+    voiceChatNPC = null;
+    voiceTranscript = '';
+
+    if (!text || !npc) return;
+
+    npc.chatHistory.push({ role: 'Player', text });
+    const response = await chatWithNPC(npc, text);
+    npc.chatHistory.push({ role: 'NPC', text: response.dialogue });
+    npc.emotion = response.emotion || 'neutral';
+
+    await speakNPC(response.dialogue);
+
+    if (response.action && response.action !== 'none') {
+        handleNPCAction(npc, response.action, response.activity, text, true);
+    }
+}
+
+async function handleNPCAction(npc, action, activity, playerMessage, voiceOnly) {
     if (action === 'follow') {
         npc.following = true;
-        addMsg('system', `${npc.profile.name} starts following you`);
+        if (!voiceOnly) addMsg('system', `${npc.profile.name} starts following you`);
         notify(`${npc.profile.name} is following you`);
     } else if (action === 'run_away') {
-        addMsg('system', `${npc.profile.name} runs away!`);
+        if (!voiceOnly) addMsg('system', `${npc.profile.name} runs away!`);
+        else notify(`${npc.profile.name} runs away!`);
     } else if (['wave', 'laugh', 'point'].includes(action)) {
-        addMsg('system', `${npc.profile.name} ${action}s`);
+        if (!voiceOnly) addMsg('system', `${npc.profile.name} ${action}s`);
+        else notify(`${npc.profile.name} ${action}s`);
     } else if (action === 'give_item') {
-        addMsg('system', `${npc.profile.name} gives you something`);
+        if (!voiceOnly) addMsg('system', `${npc.profile.name} gives you something`);
         notify('Received an item!');
     } else if (action === 'world_event') {
-        addMsg('system', 'Something is about to happen...');
-        closeChat();
+        if (!voiceOnly) {
+            addMsg('system', 'Something is about to happen...');
+            closeChat();
+        }
         npc.following = true;
         if (onWorldEvent) onWorldEvent(npc, activity, playerMessage);
     }

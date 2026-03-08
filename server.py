@@ -670,6 +670,10 @@ class GameServer(http.server.SimpleHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(content_length)) if content_length else {}
 
+        if self.path == '/api/tts':
+            self.handle_tts(body)
+            return
+
         handlers = {
             '/api/chat': self.handle_chat,
             '/api/world-event': self.handle_world_event,
@@ -823,6 +827,54 @@ Keep world_changes to 1-3 items max."""
         job_id = body.get('job_id', '')
         job = jobs.get(job_id, {"status": "unknown"})
         return {"job_id": job_id, **job}
+
+    def handle_tts(self, body):
+        """Text-to-speech via Gemini TTS model."""
+        text = body.get('text', '')
+        voice = body.get('voice', 'Kore')
+        print(f"  TTS: voice={voice}, text={text[:60]}...")
+        try:
+            if not genai or not GEMINI_API_KEY:
+                raise RuntimeError("Gemini not available")
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            from google.genai import types
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-preview-tts",
+                contents=text,
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice,
+                            )
+                        )
+                    ),
+                ),
+            )
+            pcm_data = response.candidates[0].content.parts[0].inline_data.data
+            import io
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(24000)
+                wf.writeframes(pcm_data)
+            wav_bytes = buf.getvalue()
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/wav')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(wav_bytes)))
+            self.end_headers()
+            self.wfile.write(wav_bytes)
+            print(f"  TTS: OK ({len(wav_bytes)} bytes)")
+        except Exception as e:
+            print(f"  TTS: Failed -- {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": str(e)}).encode())
 
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):

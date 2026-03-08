@@ -8,7 +8,7 @@ import { notify } from '../ui/hud.js';
 
 export class Player {
     constructor() {
-        this.pos = new THREE.Vector3(0, PLAYER.HEIGHT, 0);
+        this.pos = new THREE.Vector3(40, PLAYER.HEIGHT, 40);
         this.vel = new THREE.Vector3();
         this.yaw = 0;
         this.pitch = 0;
@@ -120,25 +120,27 @@ export class Player {
         const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), v.rotation.y);
         v.position.add(dir.multiplyScalar(d.speed * dt));
 
-        // Building collision for vehicle
-        const vw = (d.w || 2) / 2, vd = (d.d || 4) / 2;
-        const vehicleRadius = Math.max(vw, vd);
-        const wp = new THREE.Vector3();
-        let hit = false;
-        scene.traverse(child => {
-            if (!child.userData.collidable || child === v) return;
-            child.getWorldPosition(wp);
-            const hw = (child.userData.w || 2) / 2 + vehicleRadius;
-            const hd = (child.userData.d || 2) / 2 + vehicleRadius;
-            const dx = v.position.x - wp.x, dz = v.position.z - wp.z;
-            if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
-                const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
-                if (ox < oz) v.position.x += Math.sign(dx) * ox;
-                else v.position.z += Math.sign(dz) * oz;
-                hit = true;
-            }
-        });
-        if (hit) d.speed *= -0.3;
+        // Building collision for vehicle (Batmobile bypasses all collisions)
+        if (d.label !== 'Batmobile') {
+            const vw = (d.w || 2) / 2, vd = (d.d || 4) / 2;
+            const vehicleRadius = Math.max(vw, vd);
+            const wp = new THREE.Vector3();
+            let hit = false;
+            scene.traverse(child => {
+                if (!child.userData.collidable || child === v) return;
+                child.getWorldPosition(wp);
+                const hw = (child.userData.w || 2) / 2 + vehicleRadius;
+                const hd = (child.userData.d || 2) / 2 + vehicleRadius;
+                const dx = v.position.x - wp.x, dz = v.position.z - wp.z;
+                if (Math.abs(dx) < hw && Math.abs(dz) < hd) {
+                    const ox = hw - Math.abs(dx), oz = hd - Math.abs(dz);
+                    if (ox < oz) v.position.x += Math.sign(dx) * ox;
+                    else v.position.z += Math.sign(dz) * oz;
+                    hit = true;
+                }
+            });
+            if (hit) d.speed *= -0.3;
+        }
 
         this.pos.copy(v.position);
         this.pos.y = PLAYER.HEIGHT;
