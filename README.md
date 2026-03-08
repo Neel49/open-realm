@@ -4,7 +4,9 @@
 
 Open Realm is a browser-based 3D open world game where every NPC conversation, every object interaction, and every building is powered by AI in real time. There are no scripted dialogues, no pre-built levels — the world emerges dynamically as you explore and interact.
 
-
+<p align="center">
+  <img src="docs/screenshots/city.png" alt="Open Realm — AI-generated open world" width="700">
+</p>
 
 ## The Vision
 
