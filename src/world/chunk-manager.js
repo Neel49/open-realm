@@ -59,7 +59,7 @@ const LANDMARK_MAT_MAP = {
 function spawnLandmark(x, z, rng, parent) {
     const path = LANDMARK_MODELS[Math.floor(rng() * LANDMARK_MODELS.length)];
     const g = new THREE.Group();
-    g.position.set(x, 0, z);
+    g.position.set(x, -0.5, z);
     g.userData = { type: 'landmark', label: 'Landmark', collidable: true, w: 20, d: 20 };
     gltfLoader.load(path, (gltf) => {
         const model = gltf.scene;
@@ -70,13 +70,17 @@ function spawnLandmark(x, z, rng, parent) {
         if (maxDim > 0.01) model.scale.multiplyScalar(20 / maxDim);
         const scaledBox = new THREE.Box3().setFromObject(model);
         model.position.y = -scaledBox.min.y;
+        const toRemove = [];
         model.traverse(c => {
             if (!c.isMesh) return;
+            const name = c.parent?.name || c.name || '';
+            if (/^(Ground|Driveway)$/i.test(name)) { toRemove.push(c); return; }
             c.castShadow = true;
             c.receiveShadow = true;
             const props = LANDMARK_MAT_MAP[c.material?.name];
             if (props) c.material = new THREE.MeshStandardMaterial(props);
         });
+        toRemove.forEach(c => c.removeFromParent());
         g.add(model);
         console.log('[Landmark] Loaded', path, 'at', x, z);
     }, undefined, (err) => {
@@ -128,8 +132,14 @@ export function generateChunk(cx, cz, scene) {
         group.add(stripe);
     }
 
-    // Buildings
-    if (!isRoadX && !isRoadZ && !isPark) {
+    // Landmarks (GLB models) — decide first so we can skip normal buildings
+    const hasLandmark = !isRoadX && !isRoadZ && !isPark && rng() < 0.25;
+    if (hasLandmark) {
+        spawnLandmark(ox, oz, rng, group);
+    }
+
+    // Buildings (skip if a landmark is in this chunk)
+    if (!isRoadX && !isRoadZ && !isPark && !hasLandmark) {
         const n = Math.floor(rng() * 3) + 1;
         for (let i = 0; i < n; i++) {
             const bw = 4 + rng() * 8, bd = 4 + rng() * 8, bh = 5 + rng() * 25;
@@ -140,11 +150,6 @@ export function generateChunk(cx, cz, scene) {
             group.add(bldg);
             interactables.push(door);
         }
-    }
-
-    // Landmarks (GLB models)
-    if (!isRoadX && !isRoadZ && !isPark && !isNearSpawn && rng() < 0.25) {
-        spawnLandmark(ox, oz, rng, group);
     }
 
     // Parks
