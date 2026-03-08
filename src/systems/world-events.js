@@ -74,7 +74,57 @@ async function processChange(change, npc, scene, player, scribe) {
     const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
     const baseSpawn = player.pos.clone().add(forward.multiplyScalar(18));
     baseSpawn.y = 0;
-    const spawnPos = findClearSpawn(scene, baseSpawn);
+    const spawnPos = findClearSpawn(scene, baseSpawn, 8);
+
+    // Special case: Batmobile — use pre-made asset with fake generation delay
+    if (/batmobile/i.test(change.label || change.description || '')) {
+        showGenerating('Summoning the Batmobile...');
+        await new Promise(r => setTimeout(r, 3000));
+        hideGenerating();
+
+        try {
+            const gltf = await new Promise((resolve, reject) => {
+                gltfLoader.load('assets/generated/batmobile.glb', resolve, undefined, reject);
+            });
+            const model = gltf.scene;
+
+            const box = new THREE.Box3().setFromObject(model);
+            const size = new THREE.Vector3();
+            box.getSize(size);
+            const maxDim = Math.max(size.x, size.y, size.z);
+            if (maxDim > 0.01) model.scale.multiplyScalar(5 / maxDim);
+
+            const scaledBox = new THREE.Box3().setFromObject(model);
+            model.position.y = -scaledBox.min.y;
+
+            model.rotation.y = -Math.PI / 2;
+
+            model.traverse(c => {
+                if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }
+            });
+
+            const wrapper = new THREE.Group();
+            wrapper.add(model);
+            wrapper.position.copy(spawnPos);
+            wrapper.position.y = 0;
+            wrapper.rotation.y = player.yaw;
+            wrapper.userData = {
+                type: 'vehicle', label: 'Batmobile', interactable: true, drivable: true,
+                collidable: true, w: 5, d: 2,
+                speed: 0, steer: 0, driving: false,
+            };
+
+            scene.add(wrapper);
+            interactables.push(wrapper);
+            dynamicAssets.push(wrapper);
+            notify('The Batmobile has arrived!');
+            scribe.log('spawn', 'The Batmobile appeared nearby');
+        } catch (e) {
+            console.error('Failed to load Batmobile:', e);
+            notify('The Batmobile failed to arrive...');
+        }
+        return;
+    }
 
     if (change.type === 'spawn_building' || change.type === 'spawn_object') {
         const assetId = `gen_${Date.now()}`;

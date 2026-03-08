@@ -3,7 +3,10 @@
 // =====================================================================
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { makeMat } from './materials.js';
+
+const gltfLoader = new GLTFLoader();
 
 const CAR_COLORS = [0xcc3333, 0x3333cc, 0x33aa33, 0xcccc33, 0xeeeeee, 0x222222];
 
@@ -42,6 +45,42 @@ export function createVehicle(x, z, rng) {
         collidable: true, w: 2.2, d: 4.2,
         speed: 0, steer: 0, driving: false,
     };
+
+    return g;
+}
+
+export function createBatmobile(x, z) {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.userData = {
+        type: 'vehicle', label: 'Batmobile', interactable: true, drivable: true,
+        collidable: true, w: 5, d: 2,
+        speed: 0, steer: 0, driving: false,
+    };
+
+    gltfLoader.load('assets/generated/batmobile.glb', (gltf) => {
+        const model = gltf.scene;
+
+        // Scale to ~5m long
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        if (maxDim > 0.01) model.scale.multiplyScalar(5 / maxDim);
+
+        // Ground the model
+        const scaledBox = new THREE.Box3().setFromObject(model);
+        model.position.y = -scaledBox.min.y;
+
+        model.traverse(c => {
+            if (c.isMesh) {
+                c.castShadow = true;
+                c.receiveShadow = true;
+            }
+        });
+
+        g.add(model);
+    });
 
     return g;
 }

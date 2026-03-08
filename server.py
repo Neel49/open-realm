@@ -34,7 +34,7 @@ if env_file.exists():
     for line in env_file.read_text().splitlines():
         if "=" in line and not line.startswith("#"):
             k, v = line.strip().split("=", 1)
-            os.environ.setdefault(k, v)
+            os.environ[k] = v
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-3.1-pro-preview"
