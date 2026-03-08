@@ -14,6 +14,7 @@ import time
 import base64
 import asyncio
 import wave
+import subprocess
 from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -259,18 +260,6 @@ def generate_asset_bg(job_id, description, output_path):
     jobs[job_id]["status"] = "generating"
     abs_output = os.path.abspath(output_path)
 
-    if re.search(r'flower\s*shop|florist|flower\s*store', description.lower()):
-        pre_built = ASSETS_DIR / "flower_shop.glb"
-        if pre_built.exists():
-            print(f"  Asset {job_id}: Using Gemini code pipeline (with feedback loop)")
-            time.sleep(12)
-            file_size = pre_built.stat().st_size
-            jobs[job_id]["path"] = "assets/generated/flower_shop.glb"
-            jobs[job_id]["status"] = "done"
-            jobs[job_id]["result"] = f"Generated via Gemini code ({file_size} bytes, 2 iterations)"
-            print(f"  Asset {job_id}: SUCCESS (Gemini code, {file_size}B, 2 attempts)")
-            return
-
     if not blender_connected():
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["result"] = "Blender not connected"
@@ -279,13 +268,10 @@ def generate_asset_bg(job_id, description, output_path):
 
     blender_clear()
 
-    # Always use Gemini code generation -- it has the feedback loop,
-    # creates clean geometry with proper materials, and works reliably
-    print(f"  Asset {job_id}: Using Gemini code pipeline (with feedback loop)")
+    print(f"  Asset {job_id}: Using Gemini code pipeline")
     if try_gemini_code(job_id, description, abs_output):
         return
 
-    # All strategies failed
     jobs[job_id]["status"] = "failed"
     jobs[job_id]["result"] = "All generation methods failed"
     print(f"  Asset {job_id}: FAILED -- all strategies exhausted")
@@ -466,140 +452,81 @@ def try_polyhaven(job_id, description, output_path):
         return False
 
 
-def try_gemini_code(job_id, description, output_path, max_attempts=4):
-    """Generate Blender Python code via Gemini, execute, validate with screenshot feedback loop."""
-    print(f"  Asset {job_id}: Trying Gemini code generation...")
+def call_claude_cli(prompt, timeout=120):
+    """Call Claude CLI (claude -p) for code generation."""
+    try:
+        result = subprocess.run(
+            ['claude', '-p', prompt],
+            capture_output=True, text=True, timeout=timeout,
+            env={**os.environ, 'TERM': 'dumb'}
+        )
+        return result.stdout.strip()
+    except subprocess.TimeoutExpired:
+        print(f"  Claude CLI timed out after {timeout}s")
+        return ""
+    except Exception as e:
+        print(f"  Claude CLI error: {e}")
+        return ""
+
+
+def try_gemini_code(job_id, description, output_path):
+    """Generate Blender Python code via Claude CLI, execute in Blender, export GLB."""
+    print(f"  Asset {job_id}: Generating code via Claude CLI...")
     blender_clear()
 
-    feedback_history = []  # accumulate feedback across attempts
+    prompt = f"""Generate Blender Python code to create this 3D model: "{description}"
 
-    for attempt in range(max_attempts):
-        blender_clear()
+Rules:
+- import bpy at top
+- Use bpy.ops.mesh.primitive_* for geometry (cube_add, cylinder_add, uv_sphere_add, plane_add, cone_add)
+- Every mesh gets a material — set color BOTH ways for GLB export:
+    mat = bpy.data.materials.new("X")
+    mat.use_nodes = True
+    mat.diffuse_color = (r,g,b,1)
+    mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (r,g,b,1)
+- Use BRIGHT, COLORFUL materials — no gray, no black
+- For buildings: ~6 wide, 4 deep, 3 tall, front door opening (~2 wide, ~2.5 tall), interior floor, furniture/shelves, point light inside (energy=200), sign/awning outside
+- NO bpy.ops.export_scene, NO bpy.ops.wm.save, NO bpy.ops.object.select_all(action='SELECT') followed by delete
+- Output ONLY the Python code, no explanation, no markdown fences"""
 
-        # Build the prompt with feedback from previous attempts
-        feedback_section = ""
-        if feedback_history:
-            feedback_section = "\n\n## FEEDBACK FROM PREVIOUS ATTEMPTS (FIX THESE ISSUES):\n"
-            for i, fb in enumerate(feedback_history):
-                feedback_section += f"Attempt {i+1}: {fb}\n"
-            feedback_section += "\nYou MUST address ALL the issues above. Do NOT repeat the same mistakes.\n"
+    raw_response = call_claude_cli(prompt)
 
-        prompt = f"""Generate Blender Python code to create this 3D asset for a game:
-
-"{description}"
-
-CRITICAL REQUIREMENTS:
-1. BRIGHT, COLORFUL materials -- this is a game, not a horror movie. Use vibrant, saturated colors.
-   - Every object MUST have a material with a visible Base Color (not black, not dark gray)
-   - Use emissive materials for signs and lights (set Emission color and strength > 2)
-2. RECOGNIZABLE -- if it's a flower shop, there must be flowers! If it's a bakery, there must be bread/cakes.
-   The model should be INSTANTLY recognizable as what it's supposed to be.
-3. SIGN -- every building MUST have a visible sign/awning above the entrance with a contrasting bright color.
-4. DETAILS that match the type:
-   - Flower shop: flower pots/bouquets out front, colorful awning, green/pink theme
-   - Bakery: display counter, bread shapes, warm yellow/brown theme
-   - Restaurant: tables/chairs, counter, menu board, themed colors
-   - Generic shop: display shelves, counter, appropriate decorations
-5. BUILDING STRUCTURE:
-   - 4 walls but with an OPENING on the front face (a doorway gap ~2 units wide, ~2.5 units tall)
-   - Player walks in through the opening -- NO door mesh blocking it
-   - Interior floor (plane at y=0.01)
-   - Interior has furniture/shelves/counter appropriate to the building type
-   - At least one point light INSIDE (warm color, energy=100-300) so interior is visible
-   - Building is about 6 units wide, 4 units deep, 3 units tall
-6. FRONT DECORATION: objects placed OUTSIDE the front of the building (flowers, display items, bench, etc.)
-
-Technical:
-- import bpy at the very top
-- Use bpy.ops.mesh.primitive_* for all geometry (cube_add, cylinder_add, uv_sphere_add, plane_add, cone_add)
-- Every mesh gets a Principled BSDF material with a BRIGHT Base Color (r,g,b,1) where values are 0-1
-- For signs/glowing elements: also set Emission input to a bright color and Emission Strength to 3-5
-- Add point lights with bpy.ops.object.light_add(type='POINT', location=(...)) and set energy=200
-- Keep vertex count reasonable, use simple primitive shapes
-- NO bpy.ops.export_scene, NO bpy.ops.wm.save, NO scene clearing
-- Output ONLY executable Python code, nothing else
-{feedback_section}"""
-
+    if not raw_response or len(raw_response) < 50:
+        print(f"  Asset {job_id}: Claude returned empty/short response, falling back to Gemini...")
         raw_response = call_gemini(prompt,
-            system="You are a Blender Python expert creating game-ready 3D buildings. Output ONLY valid bpy Python code. No markdown fences, no comments outside code, no explanation text. The code must be immediately executable in Blender.",
-            timeout=180)
+            system="Output ONLY Blender Python code. No markdown. No explanation.",
+            timeout=90)
 
-        print(f"  Asset {job_id}: Raw response length: {len(raw_response)}, first 300 chars: {raw_response[:300]}")
-        code = clean_code(raw_response)
-        print(f"  Asset {job_id}: Attempt {attempt+1}/{max_attempts}, executing {len(code)} chars of cleaned code")
+    if not raw_response or len(raw_response) < 50:
+        print(f"  Asset {job_id}: No code generated")
+        return False
 
-        try:
-            blender_exec(code)
-            # Verify objects were actually created
-            scene_info = blender_command("get_scene_info", timeout=5)
-            obj_count = scene_info.get("object_count", 0) if isinstance(scene_info, dict) else 0
-            if obj_count == 0:
-                feedback_history.append("Code executed but created ZERO objects. Make sure every bpy.ops call actually creates geometry.")
-                print(f"  Asset {job_id}: Code ran but created 0 objects, retrying...")
-                continue
-            print(f"  Asset {job_id}: Created {obj_count} objects")
-        except Exception as e:
-            error_msg = str(e)[:200]
-            feedback_history.append(f"Code crashed with error: {error_msg}. Fix the Python syntax/API calls.")
-            print(f"  Asset {job_id}: Blender exec error: {e}")
-            continue
+    code = clean_code(raw_response)
+    print(f"  Asset {job_id}: Got {len(code)} chars of code, executing in Blender...")
 
-        # Take screenshot and validate with Gemini vision
-        screenshot = blender_screenshot()
-        if screenshot:
-            validation = call_gemini(
-                f"""I asked Blender to create: "{description}"
+    try:
+        blender_exec(code)
+        scene_info = blender_command("get_scene_info", timeout=5)
+        obj_count = scene_info.get("object_count", 0) if isinstance(scene_info, dict) else 0
+        print(f"  Asset {job_id}: Created {obj_count} objects")
+    except Exception as e:
+        print(f"  Asset {job_id}: Blender exec error: {e}")
 
-Look at this screenshot of what was created. Evaluate it on these criteria:
-1. Does it look like what was requested? (e.g., if "flower shop", are there flowers and a shop?)
-2. Are the colors bright and appealing, or is it dark/muddy/black?
-3. Is there a visible sign or label?
-4. Does it have recognizable details that match the description?
-5. Is there a door opening to enter?
-
-If it looks good and recognizable, reply: PASS
-If it needs improvement, reply: FAIL: <specific list of what's wrong and what to fix>
-
-Be strict -- a dark featureless box is a FAIL. A bright colorful building with the right details is a PASS.""",
-                image_b64=screenshot, timeout=60
-            )
-            validation = validation.strip()
-            print(f"  Asset {job_id}: Validation: {validation[:120]}")
-
-            if validation.startswith("PASS"):
-                print(f"  Asset {job_id}: Passed validation on attempt {attempt+1}")
-                break
-            else:
-                # Extract the feedback and add to history for next attempt
-                fail_reason = validation.replace("FAIL:", "").replace("FAIL", "").strip()
-                if fail_reason:
-                    feedback_history.append(f"Screenshot review: {fail_reason}")
-                else:
-                    feedback_history.append("Screenshot review: Model doesn't match the description well enough.")
-
-                if attempt < max_attempts - 1:
-                    print(f"  Asset {job_id}: Failed validation, retrying with feedback...")
-                    continue
-        else:
-            # No screenshot available, just accept what we have
-            print(f"  Asset {job_id}: No screenshot available, accepting result")
-            break
-
-    # Export whatever we have
     try:
         blender_export_glb(output_path)
     except Exception as e:
         print(f"  Asset {job_id}: Export error: {e}")
+        return False
 
     if os.path.exists(output_path):
         file_size = os.path.getsize(output_path)
         if file_size > 500:
             jobs[job_id]["status"] = "done"
-            jobs[job_id]["result"] = f"Generated via Gemini code ({file_size} bytes, {len(feedback_history)} iterations)"
-            print(f"  Asset {job_id}: SUCCESS (Gemini code, {file_size}B, {attempt+1} attempts)")
+            jobs[job_id]["result"] = f"Generated ({file_size} bytes)"
+            print(f"  Asset {job_id}: SUCCESS ({file_size}B)")
             return True
 
-    print(f"  Asset {job_id}: Gemini code generation failed after {max_attempts} attempts")
+    print(f"  Asset {job_id}: Export produced no usable file")
     return False
 
 

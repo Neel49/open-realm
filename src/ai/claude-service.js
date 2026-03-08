@@ -130,8 +130,7 @@ export async function requestAssetGeneration(description, id) {
     const startResult = await post('generate-asset', { description, id });
     if (!startResult.job_id) return null;
 
-    // Poll until done
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 200; i++) {
         await new Promise(r => setTimeout(r, 3000));
         const status = await post('asset-status', { job_id: startResult.job_id });
         if (status.status === 'done') return status.path;

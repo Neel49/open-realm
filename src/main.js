@@ -127,7 +127,7 @@ function update() {
         batmobileDriveTime += dt;
         if (!bankSpawned && batmobileDriveTime >= 8) {
             bankSpawned = true;
-            notify('AI is generating Gotham National Bank...');
+            notify('Gemini is generating Gotham National Bank...');
             setTimeout(() => {
                 const rot = player.inVehicle ? player.inVehicle.rotation.y : 0;
                 const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
