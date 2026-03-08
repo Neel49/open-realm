@@ -79,14 +79,26 @@ export function createBank(x, z) {
         model.position.y = -scaledBox.min.y;
 
         model.traverse(c => {
-            if (c.isMesh) {
-                c.castShadow = true;
-                c.receiveShadow = true;
-                c.material = new THREE.MeshStandardMaterial({
-                    map: bankTex,
-                    roughness: 0.7,
-                    metalness: 0.2,
-                });
+            if (!c.isMesh) return;
+            c.castShadow = true;
+            c.receiveShadow = true;
+            const matName = c.material?.name || '';
+            if (matName === 'Granite') {
+                c.material = new THREE.MeshStandardMaterial({ map: brickTex, roughness: 0.8, metalness: 0.1 });
+            } else if (matName === 'Pediment') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.7, metalness: 0.1 });
+            } else if (matName === 'Brass') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0xb8963e, roughness: 0.3, metalness: 0.8 });
+            } else if (matName === 'Iron') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6, metalness: 0.7 });
+            } else if (matName === 'Window') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0x88aacc, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.5 });
+            } else if (matName === 'Sign') {
+                c.material = new THREE.MeshStandardMaterial({ map: bankTex, roughness: 0.4, metalness: 0.3 });
+            } else if (matName === 'Steel') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.3, metalness: 0.9 });
+            } else if (matName === 'Step') {
+                c.material = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.9, metalness: 0.05 });
             }
         });
 
