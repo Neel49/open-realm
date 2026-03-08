@@ -26,7 +26,20 @@ export class MusicManager {
         const env = this.getEnvironment(playerPos);
         this.currentEnvironment = env;
         this.lastEventCount = this.scribe.events.length;
-        this._requestNewTrack(env);
+        this._playDefaultTrack();
+    }
+
+    async _playDefaultTrack() {
+        try {
+            const response = await fetch('assets/music/music_road_21f675.wav');
+            if (!response.ok) { this._requestNewTrack(this.currentEnvironment); return; }
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await this.audioCtx.decodeAudioData(arrayBuffer);
+            this._crossfadeTo(audioBuffer);
+        } catch (e) {
+            console.error('[Music] Default track failed, falling back to generation:', e);
+            this._requestNewTrack(this.currentEnvironment);
+        }
     }
 
     getEnvironment(playerPos) {
