@@ -53,7 +53,7 @@ export function createBuilding(x, z, w, h, d, color, rng) {
 export function createBank(x, z) {
     const g = new THREE.Group();
     g.position.set(x, 0, z);
-    g.userData = { type: 'building', label: 'Gotham National Bank', collidable: true, w: 10, d: 10 };
+    g.userData = { type: 'building', label: 'Gotham National Bank', collidable: true, w: 20, d: 20 };
 
     const bankTex = textureLoader.load('assets/textures/gen_1772920989704_tex.webp');
     bankTex.flipY = false;
@@ -72,7 +72,7 @@ export function createBank(x, z) {
         const size = new THREE.Vector3();
         box.getSize(size);
         const maxDim = Math.max(size.x, size.y, size.z);
-        if (maxDim > 0.01) model.scale.multiplyScalar(10 / maxDim);
+        if (maxDim > 0.01) model.scale.multiplyScalar(20 / maxDim);
 
         // Ground the model
         const scaledBox = new THREE.Box3().setFromObject(model);

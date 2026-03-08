@@ -15,7 +15,7 @@ import { updateInteraction, handleInteractKey, handleGrabKey, handleVehicleKey }
 import { processWorldEvent } from './systems/world-events.js';
 import { initChat, isChatOpen, closeChat } from './ui/chat.js';
 import { initExamine, isExamineOpen, closeExamine } from './ui/examine.js';
-import { updateInfoBar } from './ui/hud.js';
+import { updateInfoBar, notify } from './ui/hud.js';
 import { MusicManager } from './audio/music-manager.js';
 import { Scribe } from './systems/scribe.js';
 
@@ -115,13 +115,16 @@ function update() {
     // Spawn the bank after 10 seconds in the Batmobile
     if (player.inVehicle && player.inVehicle.userData.label === 'Batmobile') {
         batmobileDriveTime += dt;
-        if (!bankSpawned && batmobileDriveTime >= 10) {
+        if (!bankSpawned && batmobileDriveTime >= 8) {
             bankSpawned = true;
-            const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.inVehicle.rotation.y);
-            const bankX = player.pos.x + dir.x * 30;
-            const bankZ = player.pos.z + dir.z * 30;
-            const bank = createBank(bankX, bankZ);
-            scene.add(bank);
+            notify('AI is generating Gotham National Bank...');
+            setTimeout(() => {
+                const dir = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), player.inVehicle ? player.inVehicle.rotation.y : 0);
+                const bankX = player.pos.x + dir.x * 30;
+                const bankZ = player.pos.z + dir.z * 30;
+                const bank = createBank(bankX, bankZ);
+                scene.add(bank);
+            }, 2000);
         }
     }
 
