@@ -4,9 +4,7 @@
 
 Open Realm is a browser-based 3D open world game where every NPC conversation, every object interaction, and every building is powered by AI in real time. There are no scripted dialogues, no pre-built levels — the world emerges dynamically as you explore and interact.
 
-<p align="center">
-  <img src="docs/screenshots/flower_shop.png" alt="Bloom and Petal Flower Shop — AI-generated 3D asset" width="600">
-</p>
+
 
 ## The Vision
 
