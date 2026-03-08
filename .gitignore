@@ -2,7 +2,6 @@
 .env
 
 # Generated assets
-assets/generated/gen_*.glb
 assets/generated/test_*.glb
 assets/generated/*.blend
 

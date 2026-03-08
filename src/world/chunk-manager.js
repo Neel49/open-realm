@@ -3,6 +3,7 @@
 // =====================================================================
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { WORLD, COLORS } from '../config.js';
 import { ROAD_MAT, SIDEWALK_MAT, GRASS_MAT } from './materials.js';
 import { createBuilding } from './building.js';
@@ -11,6 +12,78 @@ import { createVehicle } from './vehicles.js';
 import { createTree, createStreetLight } from './environment.js';
 import { spawnNPC } from '../entities/npc.js';
 import { seeded } from '../utils.js';
+
+const gltfLoader = new GLTFLoader();
+const textureLoader = new THREE.TextureLoader();
+
+const LANDMARK_MODELS = [
+    'assets/generated/gen_1772922054799.glb',
+    'assets/generated/gen_1772922648492.glb',
+];
+
+function loadLandmarkTex(path) {
+    const tex = textureLoader.load(path);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 3);
+    return tex;
+}
+
+const LANDMARK_TEX = {
+    darkStone: loadLandmarkTex('assets/textures/dark_stone.png'),
+    slate:     loadLandmarkTex('assets/textures/slate_roof.png'),
+    oak:       loadLandmarkTex('assets/textures/oak_wood.png'),
+};
+
+const LANDMARK_MAT_MAP = {
+    DarkStone:    { map: LANDMARK_TEX.darkStone, roughness: 0.85, metalness: 0.05 },
+    Stone:        { map: LANDMARK_TEX.darkStone, color: 0x999999, roughness: 0.8, metalness: 0.05 },
+    GroundStone:  { map: LANDMARK_TEX.darkStone, color: 0x777777, roughness: 0.9, metalness: 0.05 },
+    Slate:        { map: LANDMARK_TEX.slate, roughness: 0.7, metalness: 0.1 },
+    DarkRoof:     { map: LANDMARK_TEX.slate, roughness: 0.7, metalness: 0.1 },
+    ChimneyBrick: { map: LANDMARK_TEX.darkStone, color: 0x884433, roughness: 0.85, metalness: 0.05 },
+    Oak:          { map: LANDMARK_TEX.oak, roughness: 0.75, metalness: 0.05 },
+    Iron:         { color: 0x222222, roughness: 0.4, metalness: 0.85 },
+    WroughtIron:  { color: 0x1a1a1a, roughness: 0.35, metalness: 0.9 },
+    Gargoyle:     { map: LANDMARK_TEX.darkStone, color: 0x666666, roughness: 0.9, metalness: 0.05 },
+    GlassRed:     { color: 0xcc2222, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.7 },
+    GlassBlue:    { color: 0x2244cc, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.7 },
+    StainedGlass: { color: 0x8833aa, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.6 },
+    GlassPane:    { color: 0x88aacc, roughness: 0.1, metalness: 0.2, transparent: true, opacity: 0.5 },
+    Ivy:          { color: 0x2d6b30, roughness: 0.9, metalness: 0.0 },
+    Gravel:       { color: 0x888080, roughness: 0.95, metalness: 0.0 },
+    CaveDark:     { color: 0x111111, roughness: 0.95, metalness: 0.0 },
+    ClockFace:    { color: 0xddddcc, roughness: 0.5, metalness: 0.3 },
+};
+
+function spawnLandmark(x, z, rng, parent) {
+    const path = LANDMARK_MODELS[Math.floor(rng() * LANDMARK_MODELS.length)];
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.userData = { type: 'landmark', label: 'Landmark', collidable: true, w: 20, d: 20 };
+    gltfLoader.load(path, (gltf) => {
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        if (maxDim > 0.01) model.scale.multiplyScalar(20 / maxDim);
+        const scaledBox = new THREE.Box3().setFromObject(model);
+        model.position.y = -scaledBox.min.y;
+        model.traverse(c => {
+            if (!c.isMesh) return;
+            c.castShadow = true;
+            c.receiveShadow = true;
+            const props = LANDMARK_MAT_MAP[c.material?.name];
+            if (props) c.material = new THREE.MeshStandardMaterial(props);
+        });
+        g.add(model);
+        console.log('[Landmark] Loaded', path, 'at', x, z);
+    }, undefined, (err) => {
+        console.error('[Landmark] Failed to load', path, err);
+    });
+    parent.add(g);
+}
 
 // Registries — shared with other systems
 export const chunks = new Map();
@@ -67,6 +140,11 @@ export function generateChunk(cx, cz, scene) {
             group.add(bldg);
             interactables.push(door);
         }
+    }
+
+    // Landmarks (GLB models)
+    if (!isRoadX && !isRoadZ && !isPark && !isNearSpawn && rng() < 0.25) {
+        spawnLandmark(ox, oz, rng, group);
     }
 
     // Parks
