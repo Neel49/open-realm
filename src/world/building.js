@@ -10,12 +10,30 @@ import { makeMat, WINDOW_MAT, WINDOW_LIT_MAT } from './materials.js';
 const gltfLoader = new GLTFLoader();
 const textureLoader = new THREE.TextureLoader();
 
+function loadBuildingTex(path) {
+    const tex = textureLoader.load(path);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+const BUILDING_TEXTURES = [
+    loadBuildingTex('assets/textures/brick.png'),
+    loadBuildingTex('assets/textures/concrete.png'),
+    loadBuildingTex('assets/textures/stone.png'),
+];
+
 export function createBuilding(x, z, w, h, d, color, rng) {
     const group = new THREE.Group();
     group.userData = { type: 'building', label: `${Math.floor(h)}m tall building`, collidable: true, w, d };
     group.position.set(x, 0, z);
 
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), makeMat(color, 0.7));
+    const baseTex = BUILDING_TEXTURES[Math.floor(rng() * BUILDING_TEXTURES.length)];
+    const tex = baseTex.clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(w / 3, h / 3);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ map: tex, color, roughness: 0.75, metalness: 0.05 }));
     mesh.position.y = h / 2;
     mesh.castShadow = true;
     mesh.receiveShadow = true;

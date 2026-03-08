@@ -14,11 +14,12 @@ export function createVehicle(x, z, rng) {
     const g = new THREE.Group();
     const color = CAR_COLORS[Math.floor(rng() * CAR_COLORS.length)];
 
-    const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 4), makeMat(color, 0.4));
+    const carPaint = new THREE.MeshStandardMaterial({ color, roughness: 0.15, metalness: 0.8 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 4), carPaint);
     body.position.y = 0.6; body.castShadow = true;
     g.add(body);
 
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 2), makeMat(color, 0.4));
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 2), carPaint);
     roof.position.set(0, 1.3, -0.3); roof.castShadow = true;
     g.add(roof);
 
