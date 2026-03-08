@@ -31,9 +31,11 @@ export function generateChunk(cx, cz, scene) {
     const oz = cz * WORLD.CHUNK_SIZE;
 
     // Ground
-    const isRoadX = Math.abs(cx) % 3 === 0;
-    const isRoadZ = Math.abs(cz) % 3 === 0;
-    const isPark = !isRoadX && !isRoadZ && rng() < 0.15;
+    const isSpawnArea = cx === 0 && cz === 0;
+    const isNearSpawn = Math.abs(cx) <= 1 && Math.abs(cz) <= 1;
+    const isRoadX = !isNearSpawn && Math.abs(cx) % 3 === 0;
+    const isRoadZ = !isNearSpawn && Math.abs(cz) % 3 === 0;
+    const isPark = isSpawnArea || (!isRoadX && !isRoadZ && rng() < 0.15);
     const groundMat = (isRoadX || isRoadZ) ? ROAD_MAT : isPark ? GRASS_MAT : SIDEWALK_MAT;
 
     const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.CHUNK_SIZE, WORLD.CHUNK_SIZE), groundMat);

@@ -46,10 +46,10 @@ sun.shadow.camera.near = 1; sun.shadow.camera.far = 200;
 sun.shadow.camera.left = -60; sun.shadow.camera.right = 60;
 sun.shadow.camera.top = 60; sun.shadow.camera.bottom = -60;
 scene.add(sun);
-scene.add(new THREE.AmbientLight(0x6644aa, 0.5));
-scene.add(new THREE.HemisphereLight(0x9977cc, 0x334422, 0.4));
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.HemisphereLight(0x87CEEB, 0x556B2F, 0.5));
 
-const purpleGlow = new THREE.PointLight(0x8844ff, 2, 40);
+const purpleGlow = new THREE.PointLight(0xffffee, 1, 40);
 purpleGlow.position.set(0, 8, 0);
 scene.add(purpleGlow);
 

@@ -164,6 +164,10 @@ async function processChange(change, npc, scene, player, scribe) {
                 model.position.copy(spawnPos);
                 model.position.y = offset;
 
+                if (assetPath.includes('flower_shop')) {
+                    model.rotation.y = Math.PI;
+                }
+
                 model.traverse(c => {
                     if (c.isMesh) {
                         c.castShadow = true;
